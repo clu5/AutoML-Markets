@@ -63,9 +63,18 @@ public class Main {
 	for (SourceConfig sourceConfig : sourceConfigs) {
 	    String sourceName = sourceConfig.getSourceName();
 	    SourceType sType = sourceConfig.getSourceType();
-	    LOG.info("Processing source {} of type {}", sourceName, sType);
+        LOG.info("Processing source {} of type {}", sourceName, sType);
+        LOG.info("Source config details: {}", sourceConfig);
+
 	    Source source = SourceType.instantiateSourceOfType(sType);
+        if (source == null) {
+            LOG.error("Failed to instantiate source of type: {}", sType);
+            continue;
+        }
+
 	    List<Source> sources = source.processSource(sourceConfig);
+        LOG.info("Processed {} sources for {}", sources.size(), sourceName);
+
 	    allSources.addAll(sources);
 	}
 	for (Source source : allSources) {
@@ -125,12 +134,15 @@ public class Main {
     }
 
     private static void configLog() {
-	final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger("com.zaxxer.hikari");
-	if (!(logger instanceof ch.qos.logback.classic.Logger)) {
-	    return;
-	}
-	ch.qos.logback.classic.Logger logbackLogger = (ch.qos.logback.classic.Logger) logger;
-	logbackLogger.setLevel(ch.qos.logback.classic.Level.WARN);
+        final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger("com.zaxxer.hikari");
+        if (!(logger instanceof ch.qos.logback.classic.Logger)) {
+            return;
+        }
+        ch.qos.logback.classic.Logger logbackLogger = (ch.qos.logback.classic.Logger) logger;
+        logbackLogger.setLevel(ch.qos.logback.classic.Level.WARN);
+
+        //ch.qos.logback.classic.Logger root = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
+        //root.setLevel(ch.qos.logback.classic.Level.INFO);
 
 	// org.apache.log4j.Logger root =
 	// org.apache.log4j.Logger.getRootLogger();

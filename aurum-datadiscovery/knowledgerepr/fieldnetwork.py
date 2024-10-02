@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import operator
 import networkx as nx
+print(f"Networkx version: {nx.__version__}")
 import os
 
 
@@ -13,6 +14,7 @@ from api.apiutils import Relation
 from api.apiutils import compute_field_id
 from api.annotation import MRS
 
+import pickle
 
 def build_hit(sn, fn):
     nid = compute_field_id(sn, fn)
@@ -78,11 +80,27 @@ class FieldNetwork:
         return hits
 
     def get_cardinality_of(self, node_id):
-        c = self.__G.node[node_id]
-        card = c['cardinality']
+        #print(f"Getting cardinality for node: {node_id}")
+        #print(f"Graph type: {type(self.__G)}")
+        #print(f"Graph attributes: {dir(self.__G)}")
+        if hasattr(self.__G, 'nodes'):
+            #print("Using nodes attribute")
+            c = self.__G.nodes[node_id]
+        elif hasattr(self.__G, 'node'):
+            #print("Using node attribute")
+            c = self.__G.node[node_id]
+        else:
+            print("Neither nodes nor node attribute found")
+            return 0
+        card = c.get('cardinality')
         if card is None:
             return 0  # no cardinality is like card 0
         return card
+        #c = self.__G.node[node_id]
+        #card = c.get('cardinality')
+        #if card is None:
+        #    return 0  # no cardinality is like card 0
+        #return card
 
     def _get_underlying_repr_graph(self):
         return self.__G
@@ -149,8 +167,7 @@ class FieldNetwork:
         :param score: the numerical value of the score
         :return:
         """
-        score = {'score': score}
-        self.__G.add_edge(node_src, node_target, relation, score)
+        self.__G.add_edge(node_src, node_target, key=relation, score=score)
 
     def fields_degree(self, topk):
         degree = nx.degree(self.__G)
@@ -224,7 +241,7 @@ class FieldNetwork:
         neighbours = self.__G[nid]
         for k, v in neighbours.items():
             if relation in v:
-                score = v[relation]['score']
+                score = v[relation].get('score', 0)
                 (db_name, source_name, field_name, data_type) = self.__id_names[k]
                 data.append(Hit(k, db_name, source_name, field_name, score))
         op = self.get_op_from_relation(relation)
@@ -464,17 +481,54 @@ def serialize_network(network, path):
     path = path + '/'  # force separator
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
-    nx.write_gpickle(G, path + "graph.pickle")
-    nx.write_gpickle(id_to_field_info, path + "id_info.pickle")
-    nx.write_gpickle(table_to_ids, path + "table_ids.pickle")
+    # Serialize the graph
+    with open(path + "graph.pickle", 'wb') as f:
+        pickle.dump(G, f, protocol=pickle.HIGHEST_PROTOCOL)
 
+    # Serialize id_to_field_info
+    with open(path + "id_info.pickle", 'wb') as f:
+        pickle.dump(id_to_field_info, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    # Serialize table_to_ids
+    with open(path + "table_ids.pickle", 'wb') as f:
+        pickle.dump(table_to_ids, f, protocol=pickle.HIGHEST_PROTOCOL)
 
 def deserialize_network(path):
-    G = nx.read_gpickle(path + "graph.pickle")
-    id_to_info = nx.read_gpickle(path + "id_info.pickle")
-    table_to_ids = nx.read_gpickle(path + "table_ids.pickle")
+    with open(path + "graph.pickle", 'rb') as f:
+        G = pickle.load(f)
+    with open(path + "id_info.pickle", 'rb') as f:
+        id_to_info = pickle.load(f)
+    with open(path + "table_ids.pickle", 'rb') as f:
+        table_to_ids = pickle.load(f)
     network = FieldNetwork(G, id_to_info, table_to_ids)
     return network
+
+#def serialize_network(network, path):
+#    """
+#    Serialize the meta schema index
+#    :param network:
+#    :param path:
+#    :return:
+#    """
+#    G = network._get_underlying_repr_graph()
+#    id_to_field_info = network._get_underlying_repr_id_to_field_info()
+#    table_to_ids = network._get_underlying_repr_table_to_ids()
+#
+#    # Make sure we create directory if this does not exist
+#    path = path + '/'  # force separator
+#    os.makedirs(os.path.dirname(path), exist_ok=True)
+#
+#    nx.write_gpickle(G, path + "graph.pickle")
+#    nx.write_gpickle(id_to_field_info, path + "id_info.pickle")
+#    nx.write_gpickle(table_to_ids, path + "table_ids.pickle")
+#
+#
+#def deserialize_network(path):
+#    G = nx.read_gpickle(path + "graph.pickle")
+#    id_to_info = nx.read_gpickle(path + "id_info.pickle")
+#    table_to_ids = nx.read_gpickle(path + "table_ids.pickle")
+#    network = FieldNetwork(G, id_to_info, table_to_ids)
+#    return network
 
 
 if __name__ == "__main__":

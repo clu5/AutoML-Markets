@@ -49,6 +49,9 @@ public class YAMLParser {
 
 	    sc.setSourceName(name);
 	    sourceConfigs.add(sc);
+
+        LOG.info("Processed source: {}, type: {}, config: {}", name, type, sc);
+
 	}
 
 	return sourceConfigs;

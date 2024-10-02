@@ -1,0 +1,81 @@
+# Ignore all .mypy_cache directories
+**/.mypy_cache/
+
+# Ignore all .meta.json and .data.json files (MyPy cache files)
+**/*.meta.json
+**/*.data.json
+
+# Rest of the .gitignore file remains the same
+# Ignore Gradle project-specific cache directory
+.gradle
+
+# Ignore Gradle build output directory
+build/
+
+# Ignore compiled Java classes
+*.class
+
+# Ignore Java package files
+*.jar
+*.war
+*.nar
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# Ignore virtual machine crash logs
+hs_err_pid*
+
+# Ignore Python cache files
+__pycache__/
+*.py[cod]
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore IDE-specific files
+.idea/
+*.iml
+.vscode/
+
+# Ignore OS-specific files
+.DS_Store
+Thumbs.db
+
+# Ignore Gradle wrapper files
+gradle/wrapper/gradle-wrapper.jar
+gradle/wrapper/gradle-wrapper.properties
+
+# Ignore Gradle task cache files
+.gradle/
+
+# Ignore test output
+test-output/
+
+# Ignore logs
+*.log
+
+# Ignore Elasticsearch data directory
+data/
+
+# Ignore specific files mentioned
+ddprofiler/:compileTestJava
+ddprofiler/Compilation
+ddprofiler/Configure
+ddprofiler/IDLE
+ddprofiler/Run
+ddprofiler/Task
+ddprofiler/gradle.properties
+
+# Ignore Neo4j files
+*.db
+
+# Ignore any local environment files
+.env
+
+# Ignore matplotlib cache
+.matplotlib/
+
+# Ignore specific library caches
+.cache/

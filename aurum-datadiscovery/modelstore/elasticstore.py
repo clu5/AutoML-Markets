@@ -78,7 +78,8 @@ class StoreHandler:
                                          'hits.hits._source.dataType']
                             )
         scroll_id = res['_scroll_id']
-        remaining = res['hits']['total']
+        #remaining = res['hits']['total']
+        remaining = res['hits']['total']['value'] if isinstance(res['hits']['total'], dict) else res['hits']['total']
         while remaining > 0:
             hits = res['hits']['hits']
             for h in hits:
@@ -122,7 +123,8 @@ class StoreHandler:
                             filter_path=filter_path
                             )
         scroll_id = res['_scroll_id']
-        remaining = res['hits']['total']
+        #remaining = res['hits']['total']
+        remaining = res['hits']['total']['value'] if isinstance(res['hits']['total'], dict) else res['hits']['total']
         while remaining > 0:
             hits = res['hits']['hits']
             for h in hits:
@@ -328,7 +330,8 @@ class StoreHandler:
                                          ]
                             )
         scroll_id = res['_scroll_id']
-        remaining = res['hits']['total']
+        #remaining = res['hits']['total']
+        remaining = res['hits']['total']['value'] if isinstance(res['hits']['total'], dict) else res['hits']['total']
         while remaining > 0:
             hits = res['hits']['hits']
             for h in hits:
@@ -411,7 +414,8 @@ class StoreHandler:
                                          'hits.hits._source.minhash']
                             )
         scroll_id = res['_scroll_id']
-        remaining = res['hits']['total']
+        #remaining = res['hits']['total']
+        remaining = res['hits']['total']['value'] if isinstance(res['hits']['total'], dict) else res['hits']['total']
 
         id_sig = []
         while remaining > 0:
@@ -446,7 +450,8 @@ class StoreHandler:
                                          'hits.hits._source.maxValue']
                             )
         scroll_id = res['_scroll_id']
-        remaining = res['hits']['total']
+        #remaining = res['hits']['total']
+        remaining = res['hits']['total']['value'] if isinstance(res['hits']['total'], dict) else res['hits']['total']
 
         id_sig = []
         while remaining > 0:

@@ -143,7 +143,7 @@ nbformat==4.4.0
 neo4j==5.25.0
 nest-asyncio==1.5.6
 networkx==3.3
-nltk==3.1
+nltk==3.9
 normality==0.2.4
 notebook_shim==0.2.3
 numpy==1.25.0

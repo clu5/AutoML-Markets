@@ -41,7 +41,7 @@ public class OpenNLPWorkloadTest {
   private String[] moneyArr = {"USD", "3 Euro", "4 SGD"};
 
   // cannot recognize any of the following money
-  private String[] moneyArr1 = {"$2", "€ 3", "SGD $"};
+  private String[] moneyArr1 = {"$2", "\u00A33", "SGD $"};
 
   // recognize the first format and the second format but not the third
   private String[] moneyArr2 = {"$ 2", "SGD 3", "$"};
