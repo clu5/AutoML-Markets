@@ -1,126 +1,124 @@
-'''
+"""
 This file can be used to run for schools data with classification task.
 
 For other tasks, please change line 19 to import respective Oracle, e.g. regression_oracle for Figure 3b
 causal_oracle for Figure 3c.
 
-'''
+"""
 
-
-from distutils.ccompiler import new_compiler
-import profile_weights
-import os,copy
-import profile
-from sklearn.feature_selection import mutual_info_classif
-from os import listdir
-from os.path import isfile, join
-import pandas as pd
-from dataset import Dataset
-from classifier_oracle import Oracle
+import copy
 import math
-import pandas as pd
-from join_path import JoinKey, JoinPath
-from join_column import  JoinColumn
-import sys
+import operator
+import os
 import pickle
-import join_path
-import operator,random
+import profile
+import random
+import sys
+from distutils.ccompiler import new_compiler
+from pathlib import Path
+
+import pandas as pd
 from sklearn import datasets, linear_model
-import group_helper,querying
+from sklearn.feature_selection import mutual_info_classif
+
+import group_helper
+import join_path
+import profile_weights
+import querying
+from classifier_oracle import Oracle as ClassifierOracle
+from dataset import Dataset
+from join_column import JoinColumn
+from join_path import JoinKey, JoinPath
+from regression_oracle import Oracle as RegressionOracle
+
 random.seed(0)
 
-path='/home/cc/opendata_cleaned/'#open_data_usa/' # path to csv files
-query_data='base_school.csv'
-class_attr='class'
-query_path=path+"/"+query_data
-model_path = '../../opendata_graph/'#'/Users/sainyam/Documents/MetamDemo/models/'#  # path to the graph model
-uninfo=0
-epsilon=0.05
+# path='/home/cc/opendata_cleaned/'#open_data_usa/' # path to csv files
+# query_data='base_school.csv'
+# class_attr='class'
+# query_path=path+"/"+query_data
+# model_path = '../../opendata_graph/'#'/Users/sainyam/Documents/MetamDemo/models/'#  # path to the graph model
+# filepath='/home/cc/network_opendata_06.csv'
 
+
+# Set up paths
+path = Path(
+    "../aurum-datadiscovery/mimic_csvs/"
+).resolve()  # Add the path to all datasets
+query_data = "patients.csv"  # Add name of initial dataset
+class_attr = "anchor_age"  # column name of prediction attribute
+query_path = path / query_data
+model_path = "~/.aurum/models/mimic_model"
+filepath = Path(
+    "~/.aurum/models/mimic_model"
+).expanduser()  # File containing all join paths
+
+# Parameters
+uninfo = 0
+epsilon = 0.05
 theta = 0.90
-filepath='/home/cc/network_opendata_06.csv'
 
 
+def detect_task_type(df, target_col):
+    if df[target_col].dtype in ["int64", "float64"]:
+        unique_values = df[target_col].nunique()
+        if unique_values > 10:  # Arbitrary threshold, adjust as needed
+            return "regression"
+    return "classification"
 
 
-def get_size_dic(path):
-    size_dic={}
-    f=open(path+'size_lst.txt')
-    for line in f:
-        line=line.strip()
-        line=line.split()
-        size_dic[line[1]]=int(line[0])
-    return size_dic
+def main():
+    base_df = pd.read_csv(query_path)
 
-def get_ignore_lst():
-    ignore_lst=[]
-    f=open('ignore.txt','r')
-    for line in f:
-        line=line.strip()
-        ignore_lst.append(line)
-    f.close()
-    return ignore_lst
+    task_type = detect_task_type(base_df, class_attr)
+    print(f"Detected task type: {task_type}")
 
+    if task_type == "classification":
+        oracle = ClassifierOracle("random forest")
+    else:
+        oracle = RegressionOracle("random forest")
 
+    orig_metric = oracle.train_classifier(base_df, class_attr)
+    print(f"Original {task_type} metric: {orig_metric}")
 
+    options = join_path.get_join_paths_from_file(query_data, filepath)
+    new_col_lst, skip_count = join_path.get_column_lst(
+        options, path, base_df, class_attr, uninfo
+    )
 
+    print(f"Skip count: {skip_count}")
+    print(f"Number of new columns: {len(new_col_lst)}")
 
-options = join_path.get_join_paths_from_file(query_data,filepath)
+    centers, assignment, clusters = join_path.cluster_join_paths(
+        new_col_lst, 100, epsilon
+    )
+    print(f"Number of clusters: {len(clusters)}")
 
+    tau = len(centers)
+    weights = profile_weights.initialize_weights(new_col_lst[0], {})
 
-files = [f for f in listdir(path) if isfile(join(path, f))]
+    metric = orig_metric
+    initial_df = copy.deepcopy(base_df)
+    candidates = centers if tau > 1 else list(range(len(new_col_lst)))
 
-
-dataset_lst=[]
-data_dic={}
-iter=0
-
-
-
-
-base_df=pd.read_csv(query_path)
-
-
-joinable_lst=options
-
-
-oracle=Oracle("random forest")
-orig_metric=oracle.train_classifier(base_df,'class')
-
-
-print ("original metric is ",orig_metric)
-
-size_dic=get_size_dic(path)
-ignore_lst=get_ignore_lst()
-
-i=0
-new_col_lst=[]
-
-
-(new_col_lst,skip_count) = join_path.get_column_lst(joinable_lst)
-
-print ("skip count",skip_count)
-print ("length is ",len(new_col_lst))
+    augmented_df = querying.run_metam(
+        tau,
+        oracle,
+        candidates,
+        theta,
+        metric,
+        initial_df,
+        new_col_lst,
+        weights,
+        class_attr,
+        clusters,
+        assignment,
+        uninfo,
+        epsilon,
+    )
+    augmented_df.to_csv("augmented_data.csv", index=False)
+    print("Augmented data saved to 'augmented_data.csv'")
 
 
-(centers,assignment,clusters)=join_path.cluster_join_paths(new_col_lst,100,epsilon)
-print (centers)
-
-
-
-tau = len(centers)
-weights={}
-weights=profile_weights.initialize_weights(new_col_lst[0],weights)
-
-metric=orig_metric
-initial_df=copy.deepcopy(base_df)
-candidates=centers
-
-
-if tau==1:
-    candidates=[i for i in range(len(new_col_lst))]
-
-
-augmented_df= querying.run_metam(tau,oracle,candidates,theta,metric,initial_df,new_col_lst,weights,class_attr,clusters,assignment,uninfo,epsilon)    
-augmented_df.to_csv('augmented_data.csv')
-
+if __name__ == "__main__":
+    main()
