@@ -5,7 +5,6 @@
 package analysis;
 
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 
 import analysis.modules.Cardinality;
@@ -34,31 +33,27 @@ public class NumericalAnalyzer implements NumericalAnalysis {
 
   @Override
   public boolean feedIntegerData(List<Long> records) {
-
-    Iterator<DataConsumer> dcs = analyzers.iterator();
-    while (dcs.hasNext()) {
-      IntegerDataConsumer dc = (IntegerDataConsumer)dcs.next();
-      dc.feedIntegerData(records);
+    for (DataConsumer dc : analyzers) {
+      if (dc instanceof IntegerDataConsumer) {
+        ((IntegerDataConsumer) dc).feedIntegerData(records);
+      }
     }
-
-    return false;
+    return true;
   }
 
   @Override
   public boolean feedFloatData(List<Float> records) {
-
-    Iterator<DataConsumer> dcs = analyzers.iterator();
-    while (dcs.hasNext()) {
-      FloatDataConsumer dc = (FloatDataConsumer)dcs.next();
-      dc.feedFloatData(records);
+    for (DataConsumer dc : analyzers) {
+      if (dc instanceof FloatDataConsumer) {
+        ((FloatDataConsumer) dc).feedFloatData(records);
+      }
     }
-
-    return false;
+    return true;
   }
 
   @Override
   public DataProfile getProfile() {
-    // TODO Auto-generated method stub
+    // TODO: Implement this method
     return null;
   }
 
@@ -81,4 +76,12 @@ public class NumericalAnalyzer implements NumericalAnalysis {
   public long getQuantile(double p) {
     return ra.getQuantile(p);
   }
+
+  @Override
+  public boolean hasEnoughDataForQuantiles() {
+    // Implement this method based on your requirements
+    // For example, you might want to check if you have at least 30 data points
+    return ca.getCardinality().getTotalRecords() >= 30;
+  }
 }
+

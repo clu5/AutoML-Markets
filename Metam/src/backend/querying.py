@@ -1,21 +1,22 @@
 import copy
-import profile_weights
+import math
+import operator
+import pickle
 import profile
-from sklearn.feature_selection import mutual_info_classif
+import random
+import sys
 from os import listdir
 from os.path import isfile, join
+
 import pandas as pd
-from dataset import Dataset
-import math
-import pandas as pd
-from join_path import JoinKey, JoinPath
-from join_column import  JoinColumn
-import sys
-import pickle
-import join_path
-import operator,random
 from sklearn import datasets, linear_model
-import group_helper
+from sklearn.feature_selection import mutual_info_classif
+
+from . import group_helper
+from . import join_path
+
+from . import dataset, join_column, join_path, profile_weights
+
 
 def run_metam(tau,oracle,candidates,theta,metric,initial_df,new_col_lst,weights,class_attr,clusters,assignment,uninfo,epsilon):
 
@@ -80,11 +81,11 @@ def run_metam(tau,oracle,candidates,theta,metric,initial_df,new_col_lst,weights,
                 else:
                     break
                 j+=1
-            
+
             if j==len(sorted_cand):
                 break
 
-            #Query the candidate 
+            #Query the candidate
             print ("Chosen candidate in iteration ", i,len(queried_cand))
             print ("Candidate id and score ", sorted_cand[j])
 
@@ -122,9 +123,9 @@ def run_metam(tau,oracle,candidates,theta,metric,initial_df,new_col_lst,weights,
                 #4a
                 #break
 
-            
 
-            
+
+
             if len(list(grp_queried_cand.keys())) == len(new_col_lst):
                 grp_size*=2
 
@@ -139,7 +140,7 @@ def run_metam(tau,oracle,candidates,theta,metric,initial_df,new_col_lst,weights,
             if len(jc_lst)==1:
                 queried_cand[jc_lst[0].loc] = tmp_metric-orig_metric
                 #if tmp_metric-orig_metric > 0:
-                #    candidates.append(jc_lst[0].loc)        
+                #    candidates.append(jc_lst[0].loc)
             grp_queried_cand[jc_representation] = tmp_metric
             total_queries+=1
             fout.write(str(max(curr_max,curr_max_grp))+" "+str(total_queries)+"\n")
@@ -208,7 +209,7 @@ def run_metam(tau,oracle,candidates,theta,metric,initial_df,new_col_lst,weights,
                     #    irregularity_count+=1
                     fout.write(str(max(curr_max,curr_max_grp))+" "+str(total_queries)+"\n")
                     samp_iter+=1
-                
+
                 #Check mean (1+epsilon)
                 print (queried_lst)
                 mean_sc=sum(queried_lst)* 1.0/len(queried_lst)
@@ -220,7 +221,7 @@ def run_metam(tau,oracle,candidates,theta,metric,initial_df,new_col_lst,weights,
                     print ("not a homogenous cluster", mean_sc, count, len(lst))
                     for c in lst:
                         candidates.append(c.loc)
-                
+
                 fout1=open('log.txt','a')
                 fout1.write(str(cl_iter)+" cluster count "+str(count)+" "+str(len(queried_lst))+"\n")
                 fout1.close()
@@ -249,7 +250,7 @@ def run_metam(tau,oracle,candidates,theta,metric,initial_df,new_col_lst,weights,
             initial_df = max_candidate
 
 
-       
+
         iter+=1
 
 

@@ -3,6 +3,7 @@ import operator
 import networkx as nx
 print(f"Networkx version: {nx.__version__}")
 import os
+import pathlib
 
 
 from collections import defaultdict
@@ -478,27 +479,28 @@ def serialize_network(network, path):
     table_to_ids = network._get_underlying_repr_table_to_ids()
 
     # Make sure we create directory if this does not exist
-    path = path + '/'  # force separator
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    path = pathlib.Path(path).expanduser()
+    path.mkdir(exist_ok=True, parents=True)
 
     # Serialize the graph
-    with open(path + "graph.pickle", 'wb') as f:
+    with open(path / "graph.pickle", 'wb') as f:
         pickle.dump(G, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     # Serialize id_to_field_info
-    with open(path + "id_info.pickle", 'wb') as f:
+    with open(path / "id_info.pickle", 'wb') as f:
         pickle.dump(id_to_field_info, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     # Serialize table_to_ids
-    with open(path + "table_ids.pickle", 'wb') as f:
+    with open(path / "table_ids.pickle", 'wb') as f:
         pickle.dump(table_to_ids, f, protocol=pickle.HIGHEST_PROTOCOL)
 
 def deserialize_network(path):
-    with open(path + "graph.pickle", 'rb') as f:
+    path = pathlib.Path(path).expanduser()
+    with open(path / "graph.pickle", 'rb') as f:
         G = pickle.load(f)
-    with open(path + "id_info.pickle", 'rb') as f:
+    with open(path / "id_info.pickle", 'rb') as f:
         id_to_info = pickle.load(f)
-    with open(path + "table_ids.pickle", 'rb') as f:
+    with open(path / "table_ids.pickle", 'rb') as f:
         table_to_ids = pickle.load(f)
     network = FieldNetwork(G, id_to_info, table_to_ids)
     return network

@@ -1,6 +1,6 @@
 import operator
 from sklearn import datasets, linear_model
-import group_helper
+from . import group_helper
 
 def initialize_weights(jc,weights):
     proflst= jc.profile_values.keys()
@@ -83,7 +83,7 @@ def get_weights(new_col_lst,base_df,queried_cand,weights,uninfo):
             i=0
             while i<uninfo:
                 weights[(prof,str(i))]=coef_lst[wt_iter]
-                i+=1 
+                i+=1
                 wt_iter+=1
             continue
         for c in collst:

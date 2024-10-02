@@ -1,6 +1,54 @@
 import pandas as pd
-from join_column import JoinColumn
+from . import join_column
 import random
+import sys
+from pathlib import Path
+#field_path = Path('../aurum-datadiscovery/knowledgerepr')
+#print(field_path.resolve())
+#sys.path.append(field_path)
+from knowledgerepr import fieldnetwork
+import pickle
+
+
+
+def load_aurum_network(path):
+    network = fieldnetwork.deserialize_network(path)
+
+    path = Path(path).expanduser()
+    with open(path / "schema_sim_index.pkl", 'rb') as f:
+        schema_sim_index = pickle.load(f)
+
+    with open(path / "content_sim_index.pkl", 'rb') as f:
+        content_sim_index = pickle.load(f)
+
+    return network, schema_sim_index, content_sim_index
+
+def get_join_paths_from_aurum(network, query_data):
+    options = []
+
+    # Get all fields for the query table
+    query_fields = network.get_fields_of_source(query_data)
+
+    for field in query_fields:
+        # Get PKFK relationships
+        pkfk_neighbors = network.neighbors_id(field, fieldnetwork.Relation.PKFK)
+
+        for neighbor in pkfk_neighbors:
+            jk1 = JoinKey('','',0,0)
+            jk2 = JoinKey('','',0,0)
+
+            jk1.tbl = query_data
+            jk1.col = network.get_info_for([field])[0][3]  # field name
+
+            jk2.tbl = neighbor.source_name
+            jk2.col = neighbor.field_name
+
+            ret_jp = JoinPath([jk1, jk2])
+            options.append(ret_jp)
+
+    return options
+
+
 def get_column_lst(joinable_lst):
     i=0
     skip_count=0
@@ -48,7 +96,7 @@ def get_column_lst(joinable_lst):
                 continue
             if col==jp.join_path[1].col or jp.join_path[0].col =='class' or col=='class':
                 continue
-            jc=JoinColumn(jp,df_r,col,base_df,class_attr,len(new_col_lst),uninfo)
+            jc=join_column.JoinColumn(jp,df_r,col,base_df,class_attr,len(new_col_lst),uninfo)
             new_col_lst.append(jc)
             if jc.column=='School Type' and jp.join_path[1].tbl=='bnea-fu3k.csv':#2012-2013 ENVIRONMENT GRADE':# and jp.join_path[1].tbl=='test1.csv':
                 f1=open('log.txt','a')
@@ -97,7 +145,7 @@ class JoinKey:
         self.unique_values = unique_values
         self.total_values = total_values
         self.non_empty = non_empty
-        try: 
+        try:
            if col_drs.metadata == 0:
                 self.join_card = 0
                 self.js = 0
@@ -126,7 +174,7 @@ def find_farthest(distance_dic):
             max_dist=distance_dic[index]
             max_dist_index=index
 
-    print (max_dist,max_dist_index) 
+    print (max_dist,max_dist_index)
     return max_dist_index
 
 
@@ -152,10 +200,10 @@ def cluster_join_paths(joinable_lst,k,epsilon):
     max_dist=0
     while i<k:
         if i==0:
-            centers.append(random.randint(0,len(joinable_lst)))     
+            centers.append(random.randint(0,len(joinable_lst)))
         else:
             centers.append(find_farthest(distance))
-        #Assignment 
+        #Assignment
         iter=0
         for j in joinable_lst:
             if i==0:
@@ -178,36 +226,41 @@ def cluster_join_paths(joinable_lst,k,epsilon):
     return (centers,assignment,get_clusters(assignment,k))
 
 
-def get_join_paths_from_file(querydata,filepath):
-    df=pd.read_csv(filepath)
-
-    subdf=df[df['tbl1']==querydata]
-    subdf2=df[df['tbl2']==querydata]
-
-    options=[]
-
-    for index,row in subdf.iterrows():
-        jk1=JoinKey('','',0,0)
-        jk2=JoinKey('','',0,0)
-        jk1.tbl=row['tbl1']
-        jk1.col=row['col1']
-
-        jk2.tbl=row['tbl2']
-        jk2.col=row['col2']
-        ret_jp = JoinPath([jk1,jk2])
-        options.append(ret_jp)
+def get_join_paths_from_file(query_data, aurum_path):
+    network, schema_sim_index, content_sim_index = load_aurum_network(aurum_path)
+    return get_join_paths_from_aurum(network, query_data)
 
 
-    for index,row in subdf2.iterrows():
-        jk1=JoinKey('','',0,0)
-        jk2=JoinKey('','',0,0)
-        jk1.tbl=row['tbl1']
-        jk1.col=row['col1']
-
-        jk2.tbl=row['tbl2']
-        jk2.col=row['col2']
-        ret_jp = JoinPath([jk2,jk1])
-        options.append(ret_jp)
-
-
-    return options
+#def get_join_paths_from_file(querydata,filepath):
+#    df=pd.read_csv(filepath)
+#
+#    subdf=df[df['tbl1']==querydata]
+#    subdf2=df[df['tbl2']==querydata]
+#
+#    options=[]
+#
+#    for index,row in subdf.iterrows():
+#        jk1=JoinKey('','',0,0)
+#        jk2=JoinKey('','',0,0)
+#        jk1.tbl=row['tbl1']
+#        jk1.col=row['col1']
+#
+#        jk2.tbl=row['tbl2']
+#        jk2.col=row['col2']
+#        ret_jp = JoinPath([jk1,jk2])
+#        options.append(ret_jp)
+#
+#
+#    for index,row in subdf2.iterrows():
+#        jk1=JoinKey('','',0,0)
+#        jk2=JoinKey('','',0,0)
+#        jk1.tbl=row['tbl1']
+#        jk1.col=row['col1']
+#
+#        jk2.tbl=row['tbl2']
+#        jk2.col=row['col2']
+#        ret_jp = JoinPath([jk2,jk1])
+#        options.append(ret_jp)
+#
+#
+#    return options

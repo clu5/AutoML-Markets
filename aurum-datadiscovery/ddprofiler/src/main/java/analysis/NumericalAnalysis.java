@@ -12,8 +12,9 @@ import sources.deprecated.Attribute.AttributeType;
  */
 public interface NumericalAnalysis
     extends Analysis, IntegerDataConsumer, FloatDataConsumer {
-
-  public Range getNumericalRange(AttributeType type);
   // add an interface to return the quantile
+  public Range getNumericalRange(AttributeType type);
   public long getQuantile(double p);
+  public boolean hasEnoughDataForQuantiles();
 }
+

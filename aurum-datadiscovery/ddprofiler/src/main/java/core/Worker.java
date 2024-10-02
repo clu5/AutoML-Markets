@@ -26,7 +26,7 @@ import store.Store;
 
 public class Worker implements Runnable {
 
-    final private Logger LOG = LoggerFactory.getLogger(Worker.class.getName());
+    final private Logger LOG = LoggerFactory.getLogger(Worker.class);
     private ProfilerConfig pc;
 
     private final int pseudoRandomSeed = 1;
@@ -131,69 +131,59 @@ public class Worker implements Runnable {
 		// FIXME: WorkerTaskResultHolder wtrf = new
 		// WorkerTaskResultHolder(c.getSourceName(), c.getAttributes(),
 		// analyzers);
-		WorkerTaskResultHolder wtrf = new WorkerTaskResultHolder(task.getSourceConfig().getSourceName(), path,
-			task.getRelationName(), task.getAttributes(), analyzers);
+        WorkerTaskResultHolder wtrf = new WorkerTaskResultHolder(task.getSourceConfig().getSourceName(), path,
+                        task.getRelationName(), task.getAttributes(), analyzers);
 
-		// List<WorkerTaskResult> rs =
-		// WorkerTaskResultHolder.makeFakeOne();
-		// WorkerTaskResultHolder wtrf = new WorkerTaskResultHolder(rs);
+                task.close();
+                List<WorkerTaskResult> results = wtrf.get();
 
-		// // FIXME: indexer.flushAndClose();
-		task.close();
-		List<WorkerTaskResult> results = wtrf.get();
+                for (WorkerTaskResult wtr : results) {
+                    store.storeDocument(wtr);
+                }
 
-		for (WorkerTaskResult wtr : results) {
-		    store.storeDocument(wtr);
-		}
-
-		conductor.notifyProcessedTask(results.size());
-	    } catch (Exception e) {
-		String init = "#########";
-		String msg = task.toString() + " $FAILED$ cause-> " + e.getMessage();
-		StackTraceElement[] trace = e.getStackTrace();
-		StringBuffer sb = new StringBuffer();
-		sb.append(init);
-		sb.append(System.lineSeparator());
-		sb.append(msg);
-		sb.append(System.lineSeparator());
-		for (int i = 0; i < trace.length; i++) {
-		    sb.append(trace[i].toString());
-		    sb.append(System.lineSeparator());
-		}
-		sb.append(System.lineSeparator());
-		String log = sb.toString();
-		try {
-		    errorQueue.put(new ErrorPackage(log));
-		} catch (InterruptedException e1) {
-		    e1.printStackTrace();
-		}
-	    }
-	}
-	LOG.info("THREAD: {} stopping", workerName);
+                conductor.notifyProcessedTask(results.size());
+            } catch (Exception e) {
+                LOG.error("Error processing task: {}", task, e);
+                String errorMessage = String.format("%s $FAILED$ cause-> %s", task, e.getMessage());
+                try {
+                    errorQueue.put(new ErrorPackage(errorMessage));
+                } catch (InterruptedException ie) {
+                    LOG.error("Interrupted while adding error to queue", ie);
+                }
+            }
+        }
+        LOG.info("THREAD: {} stopping", workerName);
     }
+
+
+
 
     private void readFirstRecords(String dbName, String path, Map<Attribute, Values> initData,
-	    Map<String, Analysis> analyzers, DataIndexer indexer) {
-	for (Entry<Attribute, Values> entry : initData.entrySet()) {
-	    Attribute a = entry.getKey();
-	    AttributeType at = a.getColumnType();
-	    Analysis analysis = null;
-	    if (at.equals(AttributeType.FLOAT)) {
-		analysis = AnalyzerFactory.makeNumericalAnalyzer();
-		((NumericalAnalysis) analysis).feedFloatData(entry.getValue().getFloats());
-	    } else if (at.equals(AttributeType.INT)) {
-		analysis = AnalyzerFactory.makeNumericalAnalyzer();
-		((NumericalAnalysis) analysis).feedIntegerData(entry.getValue().getIntegers());
-	    } else if (at.equals(AttributeType.STRING)) {
-		analysis = AnalyzerFactory.makeTextualAnalyzer(ea, pseudoRandomSeed);
-		((TextualAnalysis) analysis).feedTextData(entry.getValue().getStrings());
-	    }
-	    analyzers.put(a.getColumnName(), analysis);
-	}
-
-	// Index text read so far
-	indexer.indexData(dbName, path, initData);
+            Map<String, Analysis> analyzers, DataIndexer indexer) {
+        for (Entry<Attribute, Values> entry : initData.entrySet()) {
+            Attribute a = entry.getKey();
+            AttributeType at = a.getColumnType();
+            Analysis analysis = null;
+            try {
+                if (at.equals(AttributeType.FLOAT)) {
+                    analysis = AnalyzerFactory.makeNumericalAnalyzer();
+                    ((NumericalAnalysis) analysis).feedFloatData(entry.getValue().getFloats());
+                } else if (at.equals(AttributeType.INT)) {
+                    analysis = AnalyzerFactory.makeNumericalAnalyzer();
+                    ((NumericalAnalysis) analysis).feedIntegerData(entry.getValue().getIntegers());
+                } else if (at.equals(AttributeType.STRING)) {
+                    analysis = AnalyzerFactory.makeTextualAnalyzer(ea, pseudoRandomSeed);
+                    ((TextualAnalysis) analysis).feedTextData(entry.getValue().getStrings());
+                }
+                analyzers.put(a.getColumnName(), analysis);
+            } catch (Exception e) {
+                LOG.error("Error processing attribute: {}", a.getColumnName(), e);
+            }
+        }
+        // Index text read so far
+        indexer.indexData(dbName, path, initData);
     }
+
 
     private void feedValuesToAnalyzers(Map<Attribute, Values> data, Map<String, Analysis> analyzers) {
 	// Do the processing

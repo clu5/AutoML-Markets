@@ -1,0 +1,6 @@
+README.md
+setup.py
+Metam.egg-info/PKG-INFO
+Metam.egg-info/SOURCES.txt
+Metam.egg-info/dependency_links.txt
+Metam.egg-info/top_level.txt

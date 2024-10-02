@@ -1,14 +1,23 @@
 #! /usr/bin/env python3
 
+import traceback
 import subprocess
 from dataclasses import dataclass
 from os import environ
 from pathlib import Path
 from warnings import warn
+import logging
 from knowledgerepr.ekgstore.neo4j_store import Neo4jExporter
 from fire import Fire
 import IPython
+from IPython.terminal.embed import InteractiveShellEmbed
+from IPython.core.interactiveshell import InteractiveShell
+from traitlets.config import Config
 from main import init_system
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 run_cmd = subprocess.call
 
@@ -40,7 +49,7 @@ class CSVDataSource:
     @path.setter
     def path(self, p):
         assert isinstance(p, Path) or isinstance(p, str)
-        self._path = Path(p)
+        self._path = Path(p).resolve()  # Use resolve() to get absolute path
 
     def __dict__(self):
         return {
@@ -122,26 +131,16 @@ class AurumWrapper(object):
     """
 
     def __init__(self):
-        self.aurum_src_home = Path(get_env('AURUM_SRC_HOME', Path.cwd()))
+        self.aurum_src_home = Path(get_env('AURUM_SRC_HOME', Path.cwd())).resolve()
         self.ddprofiler_home = self.aurum_src_home.joinpath('ddprofiler')
         self.ddprofiler_run_sh = self.ddprofiler_home.joinpath('run.sh')
-        self.aurum_home = Path(get_env('AURUM_HOME', Path.home().joinpath('.aurum')))
-        try:
-            self.aurum_home.mkdir(parents=True)
-        except FileExistsError:
-            pass
+        self.aurum_home = Path(get_env('AURUM_HOME', Path.home().joinpath('.aurum'))).resolve()
+
+        for directory in [self.aurum_home, self.aurum_home.joinpath('sources'), self.aurum_home.joinpath('models')]:
+            directory.mkdir(parents=True, exist_ok=True)
 
         self.sources_dir = self.aurum_home.joinpath('sources')
-        try:
-            self.sources_dir.mkdir(parents=True)
-        except FileExistsError:
-            pass
-
         self.models_dir = self.aurum_home.joinpath('models')
-        try:
-            self.models_dir.mkdir(parents=True)
-        except FileExistsError:
-            pass
 
     def _make_ds_path(self, ds_name):
         return self.sources_dir.joinpath(ds_name + '.yml')
@@ -151,11 +150,11 @@ class AurumWrapper(object):
 
     @property
     def sources(self):
-        return [f.name.replace('.yml', '') for f in self.sources_dir.iterdir()]
+        return [f.stem for f in self.sources_dir.glob('*.yml')]
 
     @property
     def models(self):
-        return [f.name for f in self.models_dir.iterdir()]
+        return [f.name for f in self.models_dir.iterdir() if f.is_dir()]
 
     def _make_csv_ds(self, name, fp, separator=','):
         return {
@@ -168,8 +167,10 @@ class AurumWrapper(object):
         }
 
     def _store_ds(self, ds):
-        with open(self._make_ds_path(ds.name), 'w') as f:
+        ds_path = self._make_ds_path(ds.name)
+        with open(ds_path, 'w') as f:
             f.write(ds.to_yml())
+        logger.info(f"Data source configuration saved to {ds_path}")
 
 
 class AurumCLI(AurumWrapper):
@@ -182,12 +183,23 @@ class AurumCLI(AurumWrapper):
         return super().sources
 
     def add_csv_data_source(self, name, path, sep=','):
-        ds = CSVDataSource()
-        ds.name = name
-        ds.path = path
-        ds.separator = sep
+        try:
+            ds = CSVDataSource()
+            ds.name = name
+            ds.path = Path(path).resolve()  # Ensure we're using an absolute path
+            ds.separator = sep
 
-        super()._store_ds(ds)
+            if not ds.path.exists():
+                raise FileNotFoundError(f"The specified path does not exist: {ds.path}")
+
+            super()._store_ds(ds)
+            logger.info(f"CSV data source '{name}' added successfully.")
+        except Exception as e:
+            logger.error(f"Error adding CSV data source: {str(e)}")
+            raise
+
+
+
 
     def add_db_data_source(self, name, db_type, host, port, db_name, username, password):
         # TODO check if `db_type` is supported
@@ -215,31 +227,52 @@ class AurumCLI(AurumWrapper):
         try:
             model_dir_path.mkdir(parents=True)
         except FileExistsError:
-            warn(f'Model with the same name ({name}) already exists!')
+            warn(f'Model with the same name ({name\}) already exists!')
 
         run_cmd(['python', 'networkbuildercoordinator.py', '--opath', model_dir_path])
 
+
     def export_model(self, model_name, to='neo4j', neo4j_host='localhost', neo4j_port=7687, neo4j_user='neo4j',
                      neo4j_pass='n304j'):
-        supported_destionations = ['neo4j']
+        supported_destinations = ['neo4j']
 
-        if to not in supported_destionations:
-            raise NotImplementedError(f"Model destination not supported. Only {supported_destionations} are supported")
+        if to not in supported_destinations:
+            raise NotImplementedError(f"Model destination not supported. Only {supported_destinations} are supported")
 
         model_dir_path = self._make_model_path(model_name)
 
-        # Check if model exists
-        # TODO refactor to separate method
         if not model_dir_path.exists():
             available_models = '\n'.join(self.models)
             raise ModelNotFoundError(
                 f"Model {model_name} not found!\nHere are the available ones:\n{available_models}")
 
-        # Hacky way. The underlying `fieldnetwork.py:deserialize_network` should be changed
-        model_path_str = model_dir_path.__str__() + '/'
+        model_path_str = str(model_dir_path) + '/'
+
         if to == 'neo4j':
-            exporter = Neo4jExporter(host=neo4j_host, port=neo4j_port, user=neo4j_user, pwd=neo4j_pass)
-        exporter.export(model_path_str)
+            try:
+                # First, check if the Neo4j server is reachable
+                with socket.create_connection((neo4j_host, neo4j_port), timeout=5) as sock:
+                    logging.info(f"Successfully connected to Neo4j server at {neo4j_host}:{neo4j_port}")
+
+                exporter = Neo4jExporter(host=neo4j_host, port=neo4j_port, user=neo4j_user, pwd=neo4j_pass)
+                exporter.export(model_path_str)
+                logging.info(f"Model {model_name} successfully exported to Neo4j")
+            except socket.error as e:
+                logging.error(f"Failed to connect to Neo4j server at {neo4j_host}:{neo4j_port}")
+                logging.error(f"Error: {str(e)}")
+                print(f"Error: Unable to connect to Neo4j server at {neo4j_host}:{neo4j_port}")
+                print("Please check the following:")
+                print("1. Is the Neo4j server running?")
+                print("2. Is the host and port correct?")
+                print("3. Are there any firewall rules blocking the connection?")
+                print("4. Do you have the correct credentials?")
+            except neo4j.exceptions.AuthError:
+                logging.error(f"Authentication failed for Neo4j server at {neo4j_host}:{neo4j_port}")
+                print(f"Error: Authentication failed. Please check your username and password.")
+            except Exception as e:
+                logging.error(f"An unexpected error occurred while exporting the model: {str(e)}")
+                print(f"An unexpected error occurred: {str(e)}")
+                print("Please check the logs for more details.")
 
     def clear_store(self):
         """
@@ -256,14 +289,54 @@ class AurumCLI(AurumWrapper):
             print(f.read())
 
     def explore_model(self, model_name):
-        """
-        Initiates an interactive IPython session to run discovery queries.
+            """
+            Initiates an interactive IPython session to run discovery queries.
 
-        :param model_name:
-        :return:
-        """
-        api, reporting = init_system(self._make_model_path(model_name).__str__() + '/', create_reporting=True)
-        IPython.embed()
+            :param model_name: str, name of the model to explore
+            """
+            try:
+                model_path = self._make_model_path(model_name)
+                if not model_path.exists():
+                    raise ModelNotFoundError(f"Model {model_name} not found!")
+
+                print(f"Loading model from: {model_path}")
+                api, reporting = init_system(str(model_path) + '/', create_reporting=True)
+
+                # Configure IPython
+                c = Config()
+                c.InteractiveShellEmbed.colors = "Linux"  # Use colors optimized for dark backgrounds
+                c.InteractiveShellEmbed.confirm_exit = False
+
+                # Create banner
+                banner = f"""
+    Welcome to Aurum Interactive Shell
+    Model: {model_name}
+    Type 'api?' for help on using the Aurum API
+    """
+
+                # Try to use InteractiveShellEmbed
+                try:
+                    shell = InteractiveShellEmbed(config=c, banner1=banner)
+                    shell.extension_manager.load_extensions = lambda: None  # Disable extensions
+                    shell.push({"api": api, "reporting": reporting})
+                    print("Starting interactive shell...")
+                    shell()
+                except Exception as shell_error:
+                    print(f"Failed to start InteractiveShellEmbed: {str(shell_error)}")
+                    print("Falling back to IPython.embed()")
+
+                    # Fallback to IPython.embed
+                    from IPython import embed
+                    embed(colors="Linux", banner1=banner)
+
+            except Exception as e:
+                print(f"An error occurred while exploring the model: {str(e)}")
+                print("Traceback:")
+                traceback.print_exc()
+                logging.error(f"Error in explore_model: {str(e)}")
+                logging.error(traceback.format_exc())
+            finally:
+                print("Exiting explore_model")
 
 
 if __name__ == '__main__':

@@ -145,7 +145,6 @@ public class CSVSource implements Source {
 	return SourceType.csv;
     }
 
-
     private boolean isNumeric(String str) {
         if (str == null || str.trim().isEmpty()) {
             return false;
@@ -180,14 +179,14 @@ public class CSVSource implements Source {
 
             for (int i = 0; i < firstRow.length; i++) {
                 String attrName;
-                if (isNumeric(firstRow[i].trim())) {
+                if (firstRow[i] == null || firstRow[i].trim().isEmpty() || isNumeric(firstRow[i])) {
                     // This is likely data, not a header. Create a dummy column name.
                     attrName = "Column_" + (i + 1);
                     useDummyColumnNames = true;
                     LOG.info("Using dummy name for column {}: {}", i, attrName);
 
                 } else {
-                    attrName = firstRow[i];
+                    attrName = firstRow[i].trim();
                     LOG.info("Using original name for column {}: {}", i, attrName);
                 }
                 Attribute attr = new Attribute(attrName);
