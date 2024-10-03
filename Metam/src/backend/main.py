@@ -1,6 +1,8 @@
 import argparse
+import cProfile
 import logging
 import multiprocessing
+import pstats
 import sys
 from pathlib import Path
 from typing import List, Tuple
@@ -115,7 +117,13 @@ def main():
             f"Missing values in class column: {base_df[class_attr].isnull().sum()}"
         )
 
-        joinable_options = join_path.get_join_paths_from_file(query_data, str(filepath))
+        max_iterations = config["metam"].get("max_iterations", float('inf'))
+        max_join_paths = config["metam"].get("max_join_paths", float('inf'))
+
+        joinable_options = join_path.get_join_paths_from_file(query_data, str(filepath))[:max_join_paths]
+
+        # After getting joinable_options
+        logger.info(f"Number of joinable options found: {len(joinable_options)}")
 
         oracle = OracleFactory.create(config["oracle"]["type"])
         orig_metric = oracle.train(base_df, config['query']['class_attr'])
@@ -128,8 +136,6 @@ def main():
 
         logger.info(f"Original metric: {orig_metric}")
 
-        joinable_options = join_path.get_join_paths_from_file(query_data, str(filepath))
-
         new_col_lst = parallel_process_join_paths(
             joinable_options,
             Path(config["paths"]["data"]),
@@ -137,6 +143,9 @@ def main():
             config["query"]["class_attr"],
             config["metam"]["uninfo"],
         )
+
+        # After parallel processing
+        logger.info(f"Number of new columns found: {len(new_col_lst)}")
 
         # new_col_lst = []
         # for i, jp in enumerate(joinable_options):
@@ -169,7 +178,10 @@ def main():
         #    except Exception as e:
         #        logger.error(f"Error processing join path: {e}", exc_info=True)
 
-        logger.info(f"Total join columns found: {len(new_col_lst)}")
+        # Before clustering
+        if len(new_col_lst) == 0:
+            logger.warning("No new columns found. Skipping clustering and further processing.")
+            return base_df
 
         num_clusters = min(len(new_col_lst), config["metam"]["num_clusters"])
         centers, assignment, clusters = join_path.cluster_join_paths(
@@ -197,8 +209,8 @@ def main():
         #    uninfo,
         #    epsilon,
         #)
-        augmented_df = run_metam(
-            tau,
+        augmented_df = querying.run_metam(
+            config['metam']['tau'],
             oracle,
             candidates,
             theta,
@@ -224,4 +236,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    with cProfile.Profile() as pr:
+        main()
+
+    stats = pstats.Stats(pr)
+    stats.sort_stats(pstats.SortKey.TIME)
+    stats.print_stats(15)

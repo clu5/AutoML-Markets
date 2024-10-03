@@ -227,7 +227,7 @@ class AurumCLI(AurumWrapper):
         try:
             model_dir_path.mkdir(parents=True)
         except FileExistsError:
-            warn(f'Model with the same name ({name\}) already exists!')
+            warn(f'Model with the same name ({name}) already exists!')
 
         run_cmd(['python', 'networkbuildercoordinator.py', '--opath', model_dir_path])
 

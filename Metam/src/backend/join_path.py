@@ -1,15 +1,21 @@
-import pandas as pd
-from . import join_column
+import logging
+import pickle
 import random
 import sys
 from pathlib import Path
+
+import pandas as pd
 #field_path = Path('../aurum-datadiscovery/knowledgerepr')
 #print(field_path.resolve())
 #sys.path.append(field_path)
 from knowledgerepr import fieldnetwork
-import pickle
 
+from . import join_column
 
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 def load_aurum_network(path):
     network = fieldnetwork.deserialize_network(path)
@@ -28,10 +34,12 @@ def get_join_paths_from_aurum(network, query_data):
 
     # Get all fields for the query table
     query_fields = network.get_fields_of_source(query_data)
+    logger.info(f"Found {len(query_fields)} fields for {query_data}")
 
     for field in query_fields:
         # Get PKFK relationships
         pkfk_neighbors = network.neighbors_id(field, fieldnetwork.Relation.PKFK)
+        logger.info(f"Found {len(pkfk_neighbors)} PKFK neighbors for field {field}")
 
         for neighbor in pkfk_neighbors:
             jk1 = JoinKey('','',0,0)
@@ -226,8 +234,9 @@ def cluster_join_paths(joinable_lst,k,epsilon):
     return (centers,assignment,get_clusters(assignment,k))
 
 
-def get_join_paths_from_file(query_data, aurum_path):
-    network, schema_sim_index, content_sim_index = load_aurum_network(aurum_path)
+def get_join_paths_from_file(query_data, join_paths):
+    network, schema_sim_index, content_sim_index = load_aurum_network(join_paths)
+    logger.info(f"Found {len(join_paths)} join paths for {query_data}")
     return get_join_paths_from_aurum(network, query_data)
 
 
