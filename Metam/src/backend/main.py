@@ -1,7 +1,9 @@
 import argparse
 import logging
+import multiprocessing
 import sys
 from pathlib import Path
+from typing import List, Tuple
 
 import pandas as pd
 import src.backend.join_path as join_path
@@ -20,6 +22,66 @@ logger = logging.getLogger(__name__)
 def load_config(config_path):
     with open(config_path, "r") as f:
         return yaml.safe_load(f)
+
+def preprocess_data(df):
+    # Fill NaN values
+    df = df.fillna(0)
+
+    # Encode categorical variables
+    for col in df.select_dtypes(include=['object']).columns:
+        df[col] = df[col].astype('category').cat.codes
+
+    return df
+
+def process_join_path(
+    args: Tuple[str, Path, pd.DataFrame, str, int, int]
+) -> List[JoinColumn]:
+    jp, data_path, base_df, class_attr, array_loc, uninfo = args
+    new_col_lst = []
+
+    try:
+        df_l = pd.read_csv(data_path / jp.join_path[0].tbl, low_memory=False)
+        df_r = pd.read_csv(data_path / jp.join_path[1].tbl, low_memory=False)
+
+        if (
+            jp.join_path[1].col not in df_r.columns
+            or jp.join_path[0].col not in df_l.columns
+        ):
+            return new_col_lst
+
+        for col in df_r.columns:
+            if (
+                col == jp.join_path[1].col
+                or jp.join_path[0].col == class_attr
+                or col == class_attr
+            ):
+                continue
+            jc = JoinColumn(
+                jp, df_r, col, base_df, class_attr, array_loc + len(new_col_lst), uninfo
+            )
+            new_col_lst.append(jc)
+
+    except Exception as e:
+        print(f"Error processing join path: {e}")
+
+    return new_col_lst
+
+
+def parallel_process_join_paths(
+    joinable_options, data_path, base_df, class_attr, uninfo
+):
+    num_processes = multiprocessing.cpu_count()  # Use all available CPU cores
+
+    with multiprocessing.Pool(processes=num_processes) as pool:
+        args = [
+            (jp, data_path, base_df, class_attr, i * 1000, uninfo)
+            for i, jp in enumerate(joinable_options)
+        ]
+        results = pool.map(process_join_path, args)
+
+    return [
+        item for sublist in results for item in sublist
+    ]  # Flatten the list of lists
 
 
 def main():
@@ -43,6 +105,8 @@ def main():
 
         logger.info(f"Loading base dataset from {query_path}")
         base_df = pd.read_csv(query_path)
+        # Preprocess the initial dataframe
+        base_df = preprocess_data(base_df)
         logger.info(f"Base dataset shape: {base_df.shape}")
 
         logger.info(f"Unique values in class column: {base_df[class_attr].unique()}")
@@ -54,7 +118,7 @@ def main():
         joinable_options = join_path.get_join_paths_from_file(query_data, str(filepath))
 
         oracle = OracleFactory.create(config["oracle"]["type"])
-        orig_metric = oracle.train(base_df, class_attr)
+        orig_metric = oracle.train(base_df, config['query']['class_attr'])
 
         if orig_metric is None:
             logger.error(
@@ -64,36 +128,46 @@ def main():
 
         logger.info(f"Original metric: {orig_metric}")
 
-        new_col_lst = []
-        for i, jp in enumerate(joinable_options):
-            logger.info(f"Processing join path {i+1}/{len(joinable_options)}")
-            try:
-                df_l = pd.read_csv(path / jp.join_path[0].tbl, low_memory=False)
-                df_r = pd.read_csv(path / jp.join_path[1].tbl, low_memory=False)
+        joinable_options = join_path.get_join_paths_from_file(query_data, str(filepath))
 
-                if (
-                    jp.join_path[1].col not in df_r.columns
-                    or jp.join_path[0].col not in df_l.columns
-                ):
-                    logger.warning(
-                        f"Skipping join due to missing columns: {jp.join_path[1].col} or {jp.join_path[0].col}"
-                    )
-                    continue
+        new_col_lst = parallel_process_join_paths(
+            joinable_options,
+            Path(config["paths"]["data"]),
+            base_df,
+            config["query"]["class_attr"],
+            config["metam"]["uninfo"],
+        )
 
-                for col in df_r.columns:
-                    if (
-                        col == jp.join_path[1].col
-                        or jp.join_path[0].col == class_attr
-                        or col == class_attr
-                    ):
-                        continue
-                    jc = JoinColumn(
-                        jp, df_r, col, base_df, class_attr, len(new_col_lst), uninfo
-                    )
-                    new_col_lst.append(jc)
+        # new_col_lst = []
+        # for i, jp in enumerate(joinable_options):
+        #    logger.info(f"Processing join path {i+1}/{len(joinable_options)}")
+        #    try:
+        #        df_l = pd.read_csv(path / jp.join_path[0].tbl, low_memory=False)
+        #        df_r = pd.read_csv(path / jp.join_path[1].tbl, low_memory=False)
 
-            except Exception as e:
-                logger.error(f"Error processing join path: {e}", exc_info=True)
+        #        if (
+        #            jp.join_path[1].col not in df_r.columns
+        #            or jp.join_path[0].col not in df_l.columns
+        #        ):
+        #            logger.warning(
+        #                f"Skipping join due to missing columns: {jp.join_path[1].col} or {jp.join_path[0].col}"
+        #            )
+        #            continue
+
+        #        for col in df_r.columns:
+        #            if (
+        #                col == jp.join_path[1].col
+        #                or jp.join_path[0].col == class_attr
+        #                or col == class_attr
+        #            ):
+        #                continue
+        #            jc = JoinColumn(
+        #                jp, df_r, col, base_df, class_attr, len(new_col_lst), uninfo
+        #            )
+        #            new_col_lst.append(jc)
+
+        #    except Exception as e:
+        #        logger.error(f"Error processing join path: {e}", exc_info=True)
 
         logger.info(f"Total join columns found: {len(new_col_lst)}")
 
@@ -108,21 +182,37 @@ def main():
 
         weights = profile_weights.initialize_weights(new_col_lst[0], {})
 
-        augmented_df = querying.run_metam(
-            len(centers),
+        #augmented_df = querying.run_metam(
+        #    len(centers),
+        #    oracle,
+        #    centers,
+        #    theta,
+        #    orig_metric,
+        #    base_df,
+        #    new_col_lst,
+        #    weights,
+        #    class_attr,
+        #    clusters,
+        #    assignment,
+        #    uninfo,
+        #    epsilon,
+        #)
+        augmented_df = run_metam(
+            tau,
             oracle,
-            centers,
+            candidates,
             theta,
             orig_metric,
             base_df,
             new_col_lst,
             weights,
-            class_attr,
+            config['query']['class_attr'],
             clusters,
             assignment,
-            uninfo,
+            config['metam']['uninfo'],
             epsilon,
         )
+
 
         output_path = config["output"]["path"]
         augmented_df.to_csv(output_path, index=False)

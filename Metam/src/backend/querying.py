@@ -7,6 +7,8 @@ import random
 import sys
 from os import listdir
 from os.path import isfile, join
+from concurrent.futures import ProcessPoolExecutor
+from functools import lru_cache
 
 import pandas as pd
 from sklearn import datasets, linear_model
@@ -43,7 +45,7 @@ def run_metam(
 
     stopping_criterion = 1000
     base_df = copy.deepcopy(initial_df)
-    orig_metric = oracle.train_classifier(base_df, class_attr)
+    orig_metric = oracle.train(base_df, class_attr)
 
     with open("output.txt", "w") as fout:
         total_queries = 0
@@ -85,7 +87,7 @@ def run_metam(
                 merged_df[new_col_lst[candidate_id].column] = new_col_lst[
                     candidate_id
                 ].merged_df[new_col_lst[candidate_id].column]
-                tmp_metric = max(oracle.train_classifier(merged_df, class_attr), metric)
+                tmp_metric = max(oracle.train(merged_df, class_attr), metric)
 
                 print(
                     f"Iteration metric: {tmp_metric}, Table: {new_col_lst[candidate_id].join_path.join_path[1].tbl}, Column: {new_col_lst[candidate_id].join_path.join_path[1].col}"
@@ -131,7 +133,7 @@ def run_metam(
                 grp_merged_df[jc.column] = jc.merged_df[jc.column]
 
             tmp_metric = max(
-                oracle.train_classifier(grp_merged_df, class_attr), orig_metric
+                oracle.train(grp_merged_df, class_attr), orig_metric
             )
             if tmp_metric > orig_metric and len(jc_lst) == 1:
                 candidates.append(jc_lst[0].loc)

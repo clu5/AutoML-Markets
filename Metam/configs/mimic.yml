@@ -1,0 +1,16 @@
+# config.yaml
+paths:
+  data: "../aurum-datadiscovery/mimic_csvs/"
+  model: "~/.aurum/models/mimic_model"
+query:
+  data: "patients.csv"
+  class_attr: "anchor_age"
+metam:
+  epsilon: 0.05
+  theta: 0.90
+  uninfo: 0
+  num_clusters: 100
+oracle:
+  type: "random_forest"
+output:
+  path: "augmented_data.csv"
