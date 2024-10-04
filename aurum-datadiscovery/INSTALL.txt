@@ -1,10 +1,10 @@
-# install python packages
 pip install --no-deps -r requirements.txt
+pip install -e .
 
 # install java
-sudo apt-get update && sudo apt-get install default-jdk
+sudo apt-get update && sudo apt-get -y install default-jdk
 java -version
-#output 
+#output
 # openjdk version "11.0.24" 2024-07-16
 # OpenJDK Runtime Environment (build 11.0.24+8-post-Ubuntu-1ubuntu320.04)
 # OpenJDK 64-Bit Server VM (build 11.0.24+8-post-Ubuntu-1ubuntu320.04, mixed mode, sharing)
@@ -13,24 +13,31 @@ update-alternatives --config java
 vim ~/.bashrc
 # Add to bashrc
 export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+
 source  ~/.bashrc
 echo $JAVA_HOME
-sudo apt-get install gradle
+sudo apt-get -y install gradle
 cd ddprofiler && bash build.sh
 
 # install elasticsearch
-wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
-sudo apt-get install apt-transport-https
-echo "deb https://artifacts.elastic.co/packages/7.x/apt stable main" | sudo tee /etc/apt/sources.list.d/elastic-7.x.list
-sudo apt-get update && sudo apt-get install elasticsearch=7.17.12
-pip install elasticsearch==7.17.12
-sudo vim /etc/elasticsearch/elasticsearch.yml
+wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add - && sudo apt-get -y install apt-transport-https && echo "deb https://artifacts.elastic.co/packages/7.x/apt stable main" | sudo tee /etc/apt/sources.list.d/elastic-7.x.list
+sudo apt-get update && sudo apt-get -y install elasticsearch=7.17.12
 
-# add to yaml file 
-network.host: 0.0.0.0 
-discovery.type: single-node 
-http.port: 9200 
+sudo vim /etc/elasticsearch/elasticsearch.yml
+# add to yaml file
+network.host: 0.0.0.0
+discovery.type: single-node
+http.port: 9200
 transport.port: 9300
 
 sudo service elasticsearch restart
 curl -X GET "localhost:9200/"
+
+
+./aurum_cli.py add-csv mimic_ds /data/mimic_csvs ,
+./aurum_cli.py show-source mimic_ds
+./aurum_cli.py list-sources
+./aurum_cli.py profile mimic_ds
+./aurum_cli.py build-model mimic_demo_model
+
+./aurum_cli.py add-csv mimic_ds ../mimic_csvs , && ./aurum_cli.py profile mimic_ds && ./aurum_cli.py build-model mimic_demo_model

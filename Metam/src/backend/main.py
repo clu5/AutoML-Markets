@@ -132,6 +132,7 @@ def main():
         base_df = preprocess_data(base_df)
         logger.info(f"Base dataset shape: {base_df.shape}")
 
+
         if args.debug:
             logger.debug(f"Data feature information:\n{base_df.describe()}")
             logger.debug(f"Data correlation matrix:\n{base_df.corr()}")
@@ -142,37 +143,41 @@ def main():
             f"Missing values in class column: {base_df[class_attr].isnull().sum()}"
         )
 
-        # max_iterations = config["metam"].get("max_iterations", float("inf"))
-        # max_join_paths = config["metam"].get("max_join_paths", float("inf"))
-
+        # Remove potential leakage columns
+        columns_to_remove = ["dod", "deathtime"]
+        base_df = base_df.drop(
+            columns=[col for col in columns_to_remove if col in base_df.columns]
+        )
 
         network, _, _ = join_path.load_aurum_network(str(model_path))
 
-
         if network:
             # Remove the .csv extension from the query_data if present
-            query_data_name = query_data.rsplit('.', 1)[0] if query_data.endswith('.csv') else query_data
+            query_data_name = (
+                query_data.rsplit(".", 1)[0]
+                if query_data.endswith(".csv")
+                else query_data
+            )
 
             # Check if the query_data_name exists in the network
             all_sources = list(network._get_underlying_repr_table_to_ids().keys())
             if query_data_name not in all_sources:
-                logger.warning(f"Table '{query_data_name}' not found in the Aurum model. Available tables: {all_sources}")
-                logger.info("Attempting to find a similar table name...")
-                similar_tables = [s for s in all_sources if query_data_name.lower() in s.lower()]
-                if similar_tables:
-                    query_data_name = similar_tables[0]
-                    logger.info(f"Using similar table name: {query_data_name}")
-                else:
-                    logger.warning("No similar table name found. Using all tables.")
-                    query_data_name = None
+                logger.warning(
+                    f"Table '{query_data_name}' not found in the Aurum model. Available tables: {all_sources}"
+                )
+                logger.info("Using all available tables for join path search.")
+                query_data_name = None
 
-            joinable_options = get_join_paths_from_aurum(network, query_data_name)
+            joinable_options = join_path.get_join_paths_from_aurum(
+                network, query_data_name
+            )
         else:
-            logger.warning("Failed to load Aurum network. Falling back to CSV-based join paths.")
-            joinable_options = get_join_paths_from_file(query_data, str(model_path / 'network_opendata_06.csv'))
+            logger.warning(
+                "Failed to load Aurum network. Falling back to CSV-based join paths."
+            )
+            sys.exit(1)
 
-
-
+        # original baseline performance
         tpot_config = config["metam"].get("tpot", {})
         oracle = OracleFactory.create(config["oracle"]["type"], config=tpot_config)
         orig_metric = oracle.train(base_df, config["query"]["class_attr"])
@@ -205,37 +210,45 @@ def main():
             new_col_lst = [item for sublist in new_col_lst for item in sublist]
         else:
             logger.info("Starting sequential join path processing")
-            new_col_lst = []
-            for i, jp in enumerate(joinable_options):
-                logger.info(f"Processing join path {i+1}/{len(joinable_options)}")
+            new_col_lst = join_path.process_join_paths(
+                joinable_options,
+                Path(config["paths"]["data"]),
+                base_df,
+                config["query"]["class_attr"],
+                config["metam"]["uninfo"],
+            )
 
-                try:
-                    df_l = pd.read_csv(path / jp.join_path[0].tbl, low_memory=False)
-                    df_r = pd.read_csv(path / jp.join_path[1].tbl, low_memory=False)
+            # new_col_lst = []
+            # for i, jp in enumerate(joinable_options):
+            #    logger.info(f"Processing join path {i+1}/{len(joinable_options)}")
 
-                    merged_df = pd.merge(
-                        df_l,
-                        df_r,
-                        left_on=jp.join_path[0].col,
-                        right_on=jp.join_path[1].col,
-                        how="left",
-                    )
+            #    try:
+            #        df_l = pd.read_csv(path / jp.join_path[0].tbl, low_memory=False)
+            #        df_r = pd.read_csv(path / jp.join_path[1].tbl, low_memory=False)
 
-                    for col in df_r.columns:
-                        if (
-                            col != jp.join_path[1].col
-                            and col != class_attr
-                            and col not in df_l.columns
-                        ):
-                            new_col_lst.append((merged_df[col], jp))
+            #        merged_df = pd.merge(
+            #            df_l,
+            #            df_r,
+            #            left_on=jp.join_path[0].col,
+            #            right_on=jp.join_path[1].col,
+            #            how="left",
+            #        )
 
-                    if args.debug:
-                        # Evaluate the score for this join path
-                        tmp_metric = oracle.train(merged_df, class_attr)
-                        logger.debug(f"Join path {i} score: {tmp_metric}")
+            #        for col in df_r.columns:
+            #            if (
+            #                col != jp.join_path[1].col
+            #                and col != class_attr
+            #                and col not in df_l.columns
+            #            ):
+            #                new_col_lst.append((merged_df[col], jp))
 
-                except Exception as e:
-                    logger.error(f"Error processing join path: {e}", exc_info=True)
+            #        if args.debug:
+            #            # Evaluate the score for this join path
+            #            tmp_metric = oracle.train(merged_df, class_attr)
+            #            logger.debug(f"Join path {i} score: {tmp_metric}")
+
+            #    except Exception as e:
+            #        logger.error(f"Error processing join path: {e}", exc_info=True)
 
         logger.info(
             f"Join path processing completed. Found {len(new_col_lst)} new columns"
@@ -250,7 +263,7 @@ def main():
 
         num_clusters = min(len(new_col_lst), config["metam"]["num_clusters"])
         centers, assignment, clusters = join_path.cluster_join_paths(
-            new_col_lst, num_clusters, epsilon
+            new_col_lst, num_clusters, config["metam"]["epsilon"]
         )
         logger.info(f"Number of clusters: {len(clusters)}")
 
@@ -277,8 +290,8 @@ def main():
         augmented_df = querying.run_metam(
             config["metam"]["tau"],
             oracle,
-            candidates,
-            theta,
+            centers,
+            config["metam"]["theta"],
             orig_metric,
             base_df,
             new_col_lst,
@@ -287,7 +300,8 @@ def main():
             clusters,
             assignment,
             config["metam"]["uninfo"],
-            epsilon,
+            config["metam"]["epsilon"],
+            config["metam"]["max_iterations"],
         )
 
         output_path = config["output"]["path"]

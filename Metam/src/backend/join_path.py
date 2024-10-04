@@ -20,6 +20,75 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def process_join_paths(joinable_options, data_path, base_df, class_attr, uninfo):
+    new_col_lst = []
+    for i, jp in enumerate(joinable_options):
+        logger.info(f"Processing join path {i+1}/{len(joinable_options)}")
+        try:
+            df_l = pd.read_csv(data_path / jp.join_path[0].tbl, low_memory=False)
+            df_r = pd.read_csv(data_path / jp.join_path[1].tbl, low_memory=False)
+
+            merged_df = pd.merge(
+                df_l,
+                df_r,
+                left_on=jp.join_path[0].col,
+                right_on=jp.join_path[1].col,
+                how="left",
+            )
+
+            for col in df_r.columns:
+                if (
+                    col != jp.join_path[1].col
+                    and col != class_attr
+                    and col not in df_l.columns
+                ):
+                    jc = join_column.JoinColumn(
+                        jp,
+                        merged_df,
+                        col,
+                        base_df,
+                        class_attr,
+                        len(new_col_lst),
+                        uninfo,
+                    )
+                    new_col_lst.append(jc)
+        except Exception as e:
+            logger.error(f"Error processing join path: {e}", exc_info=True)
+
+    logger.info(f"Join path processing completed. Found {len(new_col_lst)} new columns")
+    return new_col_lst
+
+
+def cluster_join_paths(joinable_lst, k, epsilon):
+    i = 0
+    random.seed(0)
+    centers = []
+    assignment = {}
+    distance = {}
+    max_dist = 0
+    while i < k:
+        if i == 0:
+            centers.append(random.randint(0, len(joinable_lst) - 1))
+        else:
+            centers.append(find_farthest(distance))
+        # Assignment
+        for j, join_col in enumerate(joinable_lst):
+            if i == 0:
+                assignment[j] = 0
+                distance[j] = 0  # Initialize with 0 distance
+            else:
+                new_dist = 0  # Set to 0 if get_distance is not available
+                if new_dist < distance.get(j, float("inf")):
+                    assignment[j] = len(centers) - 1
+                    distance[j] = new_dist
+                    if distance[j] > max_dist:
+                        max_dist = distance[j]
+        if max_dist < epsilon:
+            break
+        i += 1
+    return (centers, assignment, get_clusters(assignment, k))
+
+
 @lru_cache(maxsize=None)
 def cached_get_fields_of_source(network, source):
     return network.get_fields_of_source(source)
@@ -68,7 +137,6 @@ def get_join_paths_from_file(query_data, model_path):
     return join_paths
 
 
-
 def get_join_paths_from_aurum(network, query_data):
     logger.info(f"Searching for join paths for query data: {query_data}")
     options = []
@@ -78,12 +146,15 @@ def get_join_paths_from_aurum(network, query_data):
     logger.info(f"All sources in the network: {all_sources}")
 
     # Try to find the query_data in the network
-    matching_sources = [s for s in all_sources if query_data.lower() in s.lower()]
-    logger.info(f"Matching sources: {matching_sources}")
-
-    if not matching_sources:
-        logger.warning(f"No exact match found for {query_data}. Using all sources.")
+    if query_data is None or query_data not in all_sources:
+        logger.warning(
+            f"Table '{query_data}' not found in the Aurum model. Using all available tables."
+        )
         matching_sources = all_sources
+    else:
+        matching_sources = [query_data]
+
+    logger.info(f"Using sources: {matching_sources}")
 
     for source in matching_sources:
         # Get all fields for the query table
@@ -96,8 +167,10 @@ def get_join_paths_from_aurum(network, query_data):
             pkfk_neighbors = network.neighbors_id(field, fieldnetwork.Relation.PKFK)
 
             # Handle DRS object
-            if isinstance(pkfk_neighbors, api.apiutils.DRS):
+            if hasattr(pkfk_neighbors, "data"):
                 pkfk_neighbors = pkfk_neighbors.data
+            elif not isinstance(pkfk_neighbors, list):
+                pkfk_neighbors = [pkfk_neighbors] if pkfk_neighbors else []
 
             logger.info(f"Found {len(pkfk_neighbors)} PKFK neighbors for field {field}")
 
@@ -110,6 +183,7 @@ def get_join_paths_from_aurum(network, query_data):
 
     logger.info(f"Found {len(options)} join paths")
     return options
+
 
 def load_aurum_network(path):
     path = Path(path).expanduser()
@@ -156,12 +230,15 @@ def load_aurum_network(path):
     logger.info("Sample of PKFK relationships:")
     for node in list(G.nodes())[:5]:  # Print PKFK for first 5 nodes
         pkfk_neighbors = network.neighbors_id(node, fieldnetwork.Relation.PKFK)
-        if isinstance(pkfk_neighbors, api.apiutils.DRS):
-            pkfk_neighbors = pkfk_neighbors.data
-        logger.info(f"Node: {node}, PKFK neighbors: {[n.nid for n in pkfk_neighbors]}")
+        # Check if pkfk_neighbors is iterable (list, set, etc.)
+        if hasattr(pkfk_neighbors, "__iter__"):
+            neighbor_ids = [n.nid for n in pkfk_neighbors]
+        else:
+            # If it's not iterable, it might be a single object, so we put it in a list
+            neighbor_ids = [pkfk_neighbors.nid] if pkfk_neighbors else []
+        logger.info(f"Node: {node}, PKFK neighbors: {neighbor_ids}")
 
     return network, None, None
-
 
 
 def get_column_lst(joinable_lst):
@@ -200,13 +277,13 @@ def get_column_lst(joinable_lst):
                 continue
 
         if jp.join_path[0].tbl not in data_dic.keys():
-            df_l = pd.read_csv(path + "/" + jp.join_path[0].tbl, low_memory=False)
+            df_l = pd.read_csv(path + "/" + jp.join_path[0].tbl, low_memory=false)
             data_dic[jp.join_path[0].tbl] = df_l
             print("dataset size is ", df_l.shape)
         else:
             df_l = data_dic[jp.join_path[0].tbl]
         if jp.join_path[1].tbl not in data_dic.keys():
-            df_r = pd.read_csv(path + "/" + jp.join_path[1].tbl, low_memory=False)
+            df_r = pd.read_csv(path + "/" + jp.join_path[1].tbl, low_memory=false)
             data_dic[jp.join_path[1].tbl] = df_r
             print("dataset size is ", df_r.shape)
         else:
@@ -227,7 +304,7 @@ def get_column_lst(joinable_lst):
             continue
         for col in collst:
             if (
-                jp.join_path[1].tbl == "2013_NYC_School_Survey.csv"
+                jp.join_path[1].tbl == "2013_nyc_school_survey.csv"
                 or jp.join_path[1].tbl == "5a8g-vpdd.csv"
             ):
                 continue
@@ -237,13 +314,13 @@ def get_column_lst(joinable_lst):
                 or col == "class"
             ):
                 continue
-            jc = join_column.JoinColumn(
+            jc = join_column.joincolumn(
                 jp, df_r, col, base_df, class_attr, len(new_col_lst), uninfo
             )
             new_col_lst.append(jc)
             if (
-                jc.column == "School Type" and jp.join_path[1].tbl == "bnea-fu3k.csv"
-            ):  # 2012-2013 ENVIRONMENT GRADE':# and jp.join_path[1].tbl=='test1.csv':
+                jc.column == "school type" and jp.join_path[1].tbl == "bnea-fu3k.csv"
+            ):  # 2012-2013 environment grade':# and jp.join_path[1].tbl=='test1.csv':
                 f1 = open("log.txt", "a")
                 f1.write(
                     str(len(new_col_lst) - 1)
@@ -261,7 +338,21 @@ def get_column_lst(joinable_lst):
     return (new_col_lst, skip_count)
 
 
+class JoinKey:
+    def __init__(self, tbl, col):
+        self.tbl = tbl
+        self.col = col
+
+
 class JoinPath:
+    def __init__(self, join_key_list):
+        self.join_path = join_key_list
+
+    def to_str(self):
+        return f"{self.join_path[0].tbl}.{self.join_path[0].col} JOIN {self.join_path[1].tbl}.{self.join_path[1].col}"
+
+
+class joinpath:
     def __init__(self, join_key_list):
         self.join_path = join_key_list
 
@@ -270,7 +361,7 @@ class JoinPath:
         for i, join_key in enumerate(self.join_path):
             format_str += join_key.tbl[:-4] + "." + join_key.col
             if i < len(self.join_path) - 1:
-                format_str += " JOIN "
+                format_str += " join "
         return format_str
 
     def set_df(self, data_dic):
@@ -299,7 +390,7 @@ class JoinPath:
         return 0
 
 
-class JoinKey:
+class joinkey:
     def __init__(self, col_drs, unique_values, total_values, non_empty):
         self.dataset = ""
         try:
@@ -327,13 +418,13 @@ class JoinKey:
 
 def get_join_type(join_card):
     if join_card == 0:
-        return "One-to-One"
+        return "one-to-one"
     elif join_card == 1:
-        return "One-to-Many"
+        return "one-to-many"
     elif join_card == 2:
-        return "Many-to-One"
+        return "many-to-one"
     else:
-        return "Many-to-Many"
+        return "many-to-many"
 
 
 def find_farthest(distance_dic):
@@ -362,50 +453,41 @@ def get_clusters(assignment, k):
     return clusters
 
 
-def cluster_join_paths(joinable_lst, k, epsilon):
-    i = 0
-    random.seed(0)
-    centers = []
-    assignment = {}
-    distance = {}
-    max_dist = 0
-    while i < k:
-        if i == 0:
-            centers.append(random.randint(0, len(joinable_lst)))
-        else:
-            centers.append(find_farthest(distance))
-        # Assignment
-        iter = 0
-        for j in joinable_lst:
-            if i == 0:
-                assignment[j] = 0
-                distance[iter] = j.get_distance(joinable_lst[centers[-1]])
-                if distance[iter] > max_dist:
-                    max_dist = distance[iter]
-            else:
-                new_dist = j.get_distance(joinable_lst[centers[-1]])
-                if (
-                    new_dist < distance[iter]
-                ):  # j.get_distance(joinable_lst[centers[assignment[j]]]):
-                    assignment[j] = len(centers) - 1
-                    distance[iter] = (
-                        new_dist  # j.get_distance(joinable_lst[centers[-1]])
-                    )
-                    if distance[iter] > max_dist:
-                        max_dist = distance[iter]
-            iter += 1
-            # update assignment
-        if max_dist < epsilon:
-            break
-        i += 1
-    return (centers, assignment, get_clusters(assignment, k))
-
+# def cluster_join_paths(joinable_lst, k, epsilon):
+#    i = 0
+#    random.seed(0)
+#    centers = []
+#    assignment = {}
+#    distance = {}
+#    max_dist = 0
+#    while i < k:
+#        if i == 0:
+#            centers.append(random.randint(0, len(joinable_lst) - 1))
+#        else:
+#            centers.append(find_farthest(distance))
+#        # Assignment
+#        for j, join_tuple in enumerate(joinable_lst):
+#            join_column = join_tuple[0]  # Assuming the JoinColumn object is the first element of the tuple
+#            if i == 0:
+#                assignment[j] = 0
+#                distance[j] = 0  # Initialize with 0 distance if get_distance is not available
+#            else:
+#                new_dist = 0  # Set to 0 if get_distance is not available
+#                if new_dist < distance.get(j, float('inf')):
+#                    assignment[j] = len(centers) - 1
+#                    distance[j] = new_dist
+#                    if distance[j] > max_dist:
+#                        max_dist = distance[j]
+#        if max_dist < epsilon:
+#            break
+#        i += 1
+#    return (centers, assignment, get_clusters(assignment, k))
 
 # def get_join_paths_from_file(query_data, join_paths):
 #    network, schema_sim_index, content_sim_index = load_aurum_network(join_paths)
-#    # logger.info(f"Network loaded. Nodes: {len(network.nodes())}, Edges: {len(network.edges())}")
+#    # logger.info(f"network loaded. nodes: {len(network.nodes())}, edges: {len(network.edges())}")
 #    paths = get_join_paths_from_aurum(network, query_data)
-#    logger.info(f"Retrieved {len(paths)} join paths from Aurum")
+#    logger.info(f"retrieved {len(paths)} join paths from aurum")
 #    return paths
 
 
@@ -418,26 +500,26 @@ def cluster_join_paths(joinable_lst, k, epsilon):
 #    options=[]
 #
 #    for index,row in subdf.iterrows():
-#        jk1=JoinKey('','',0,0)
-#        jk2=JoinKey('','',0,0)
+#        jk1=joinkey('','',0,0)
+#        jk2=joinkey('','',0,0)
 #        jk1.tbl=row['tbl1']
 #        jk1.col=row['col1']
 #
 #        jk2.tbl=row['tbl2']
 #        jk2.col=row['col2']
-#        ret_jp = JoinPath([jk1,jk2])
+#        ret_jp = joinpath([jk1,jk2])
 #        options.append(ret_jp)
 #
 #
 #    for index,row in subdf2.iterrows():
-#        jk1=JoinKey('','',0,0)
-#        jk2=JoinKey('','',0,0)
+#        jk1=joinkey('','',0,0)
+#        jk2=joinkey('','',0,0)
 #        jk1.tbl=row['tbl1']
 #        jk1.col=row['col1']
 #
 #        jk2.tbl=row['tbl2']
 #        jk2.col=row['col2']
-#        ret_jp = JoinPath([jk2,jk1])
+#        ret_jp = joinpath([jk2,jk1])
 #        options.append(ret_jp)
 #
 #

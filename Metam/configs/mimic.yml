@@ -4,21 +4,21 @@ paths:
   model: "~/.aurum/models/mimic_demo_model"
 query:
   data: "patients.csv"
-  class_attr: "gender"
+  class_attr: "anchor_age"
 metam:
   epsilon: 0.05
   theta: 0.90
   uninfo: 0
   num_clusters: 10
   tau: 5
-  max_iterations: 20
+  max_iterations: 5
   max_join_paths: 30
   use_multiprocessing: false
   num_processes: 4  # Adjust based on your system
   tpot:
     generations: 10
-    population_size: 50
-    cv: 2
+    population_size: 30
+    cv: 3
     max_time_mins: 60
     max_eval_time_mins: 5
     test_size: 0.2
@@ -27,6 +27,6 @@ metam:
     max_features: 20
     use_best_features: false
 oracle:
-  type: "classification"
+  type: "regression"
 output:
   path: "augmented_data.csv"

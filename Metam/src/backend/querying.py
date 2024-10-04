@@ -1,5 +1,6 @@
 import copy
 from functools import lru_cache
+import logging
 import math
 import operator
 import pickle
@@ -19,6 +20,7 @@ from tpot import TPOTClassifier  # We'll use TPOT for AutoML
 
 from . import dataset, group_helper, join_column, join_path, profile_weights
 
+logger = logging.getLogger(__name__)
 
 class Exp3:
     def __init__(self, n_arms, gamma):
@@ -108,8 +110,40 @@ def run_metam_online(
 
     return base_df, current_metric
 
+def run_metam(tau, oracle, candidates, theta, metric, initial_df, new_col_lst, weights, class_attr, clusters, assignment, uninfo, epsilon, max_iterations=10):
+    base_df = initial_df.copy()
+    current_metric = metric
 
-def run_metam(
+    for iteration in range(max_iterations):
+        queried_cand = {}
+        curr_max = current_metric
+
+        # Query candidates
+        for i in range(tau):
+            candidate_id = candidates[i] if i < len(candidates) else random.choice(range(len(new_col_lst)))
+            merged_df = base_df.copy()
+            merged_df[new_col_lst[candidate_id].column] = new_col_lst[candidate_id].merged_df[new_col_lst[candidate_id].column]
+
+            tmp_metric = oracle.train(merged_df, class_attr)
+            queried_cand[candidate_id] = tmp_metric - current_metric
+
+            if tmp_metric > curr_max:
+                curr_max = tmp_metric
+                best_candidate = merged_df
+
+        # Update if improved
+        if curr_max > current_metric:
+            current_metric = curr_max
+            base_df = best_candidate
+            logger.info(f"New best metric: {current_metric}")
+
+        # Check stopping criterion
+        if current_metric >= theta:
+            break
+
+    return base_df
+
+def old_run_metam(
     tau,
     oracle,
     candidates,
