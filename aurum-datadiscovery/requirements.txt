@@ -1,13 +1,14 @@
 bitarray
+datasketch
 black @ git+https://github.com/psf/black@d1d4fc58d3b744db35ac832cddf1d076ba5f5e7f
 scikit-learn
 pandas
 tpot
 causal-learn
-networkx
+networkx==3.3
 tqdm
 elastic-transport
-elasticsearch
+elasticsearch==7.17.3
 elasticsearch-dsl
 entrypoints
 fire
@@ -33,7 +34,6 @@ matplotlib
 mypy
 nbconvert
 neo4j
-networkx
 nltk
 numpy==1.25.2
 pandas
@@ -43,3 +43,4 @@ scikit-image
 scipy --only-binary=scipy
 torch
 torchvision
+redis

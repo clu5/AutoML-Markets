@@ -2,10 +2,10 @@ scikit-learn
 pandas
 TPOT
 auto-sklearn
-scikit-learn 
+scikit-learn
 causal-learn
 elasticsearch
 networkx
 bitarray
 psutil
-tqdm
+tqdm==1.25.2
