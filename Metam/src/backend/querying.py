@@ -190,7 +190,8 @@ def run_metam(
                 merged_df[new_col_lst[candidate_id].column] = new_col_lst[
                     candidate_id
                 ].merged_df[new_col_lst[candidate_id].column]
-                tmp_metric = max(oracle.train(merged_df, class_attr), metric)
+                #tmp_metric = max(oracle.train(merged_df, class_attr), metric)
+                tmp_metric = oracle.train(merged_df, class_attr)
 
                 print(
                     f"Iteration metric: {tmp_metric}, Table: {new_col_lst[candidate_id].join_path.join_path[1].tbl}, Column: {new_col_lst[candidate_id].join_path.join_path[1].col}"

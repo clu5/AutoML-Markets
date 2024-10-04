@@ -4,6 +4,7 @@ import logging
 import multiprocessing
 import pstats
 import sys
+import time
 from pathlib import Path
 from typing import List, Tuple
 
@@ -15,9 +16,6 @@ import yaml
 from src.backend.join_column import JoinColumn
 from src.backend.oracle_factory import OracleFactory
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
 logger = logging.getLogger(__name__)
 
 
@@ -89,17 +87,33 @@ def parallel_process_join_paths(
 
 
 def main():
+    start_time = time.time()
     parser = argparse.ArgumentParser(description="Run Metam data augmentation")
     parser.add_argument(
         "--config", type=str, required=True, help="Path to the config file"
     )
+    parser.add_argument("--debug", action="store_true", help="Enable debug mode")
     args = parser.parse_args()
+
+    log_level = logging.DEBUG if args.debug else logging.INFO
+    logging.basicConfig(
+        level=log_level, format="%(asctime)s - %(levelname)s - %(message)s"
+    )
 
     try:
         config = load_config(args.config)
+        if args.debug:
+            config["metam"]["tpot"]["generations"] = 10
+            config["metam"]["tpot"]["population_size"] = 10
+            config["metam"]["tpot"]["max_time_mins"] = 5
+            config["metam"]["tpot"]["max_eval_time_mins"] = 1
+
         use_multiprocessing = config["metam"].get("use_multiprocessing", False)
         num_processes = config["metam"].get(
             "num_processes", multiprocessing.cpu_count()
+        )
+        logger.info(
+            f"Multiprocessing: {'enabled' if use_multiprocessing else 'disabled'}, Processes: {num_processes}"
         )
 
         path = Path(config["paths"]["data"]).resolve()
@@ -110,6 +124,7 @@ def main():
         theta = config["metam"]["theta"]
         uninfo = config["metam"]["uninfo"]
         filepath = Path(config["paths"]["model"]).expanduser()
+        logger.info(f"Loading Aurum network from: {filepath}")
 
         logger.info(f"Loading base dataset from {query_path}")
         base_df = pd.read_csv(query_path)
@@ -117,18 +132,26 @@ def main():
         base_df = preprocess_data(base_df)
         logger.info(f"Base dataset shape: {base_df.shape}")
 
+        if args.debug:
+            logger.debug(f"Data feature information:\n{base_df.describe()}")
+            logger.debug(f"Data correlation matrix:\n{base_df.corr()}")
+
         logger.info(f"Unique values in class column: {base_df[class_attr].unique()}")
         logger.info(f"Data types of all columns:\n{base_df.dtypes}")
         logger.info(
             f"Missing values in class column: {base_df[class_attr].isnull().sum()}"
         )
 
-        max_iterations = config["metam"].get("max_iterations", float("inf"))
-        max_join_paths = config["metam"].get("max_join_paths", float("inf"))
+        # max_iterations = config["metam"].get("max_iterations", float("inf"))
+        # max_join_paths = config["metam"].get("max_join_paths", float("inf"))
 
-        joinable_options = join_path.get_join_paths_from_file(
-            query_data, str(filepath)
-        )[:max_join_paths]
+        joinable_options = join_path.get_join_paths_from_file(query_data, str(filepath))
+
+        if args.debug:
+            for i, jp in enumerate(
+                joinable_options[:5]
+            ):  # Print first 5 join paths in debug mode
+                logger.debug(f"Join path {i}: {jp.to_str()}")
 
         # After getting joinable_options
         logger.info(f"Number of joinable options found: {len(joinable_options)}")
@@ -146,6 +169,7 @@ def main():
         logger.info(f"Original metric: {orig_metric}")
 
         if use_multiprocessing:
+            logger.info("Starting multiprocessing join path processing")
             with multiprocessing.Pool(num_processes) as pool:
                 new_col_lst = pool.starmap(
                     process_join_path,
@@ -163,29 +187,42 @@ def main():
                 )
             new_col_lst = [item for sublist in new_col_lst for item in sublist]
         else:
+            logger.info("Starting sequential join path processing")
             new_col_lst = []
             for i, jp in enumerate(joinable_options):
-                new_col_lst.extend(
-                    process_join_path(
-                        jp,
-                        Path(config["paths"]["data"]),
-                        base_df,
-                        config["query"]["class_attr"],
-                        i * 1000,
-                        config["metam"]["uninfo"],
+                logger.info(f"Processing join path {i+1}/{len(joinable_options)}")
+
+                try:
+                    df_l = pd.read_csv(path / jp.join_path[0].tbl, low_memory=False)
+                    df_r = pd.read_csv(path / jp.join_path[1].tbl, low_memory=False)
+
+                    merged_df = pd.merge(
+                        df_l,
+                        df_r,
+                        left_on=jp.join_path[0].col,
+                        right_on=jp.join_path[1].col,
+                        how="left",
                     )
-                )
 
-        # new_col_lst = parallel_process_join_paths(
-        #    joinable_options,
-        #    Path(config["paths"]["data"]),
-        #    base_df,
-        #    config["query"]["class_attr"],
-        #    config["metam"]["uninfo"],
-        # )
+                    for col in df_r.columns:
+                        if (
+                            col != jp.join_path[1].col
+                            and col != class_attr
+                            and col not in df_l.columns
+                        ):
+                            new_col_lst.append((merged_df[col], jp))
 
-        # After parallel processing
-        logger.info(f"Number of new columns found: {len(new_col_lst)}")
+                    if args.debug:
+                        # Evaluate the score for this join path
+                        tmp_metric = oracle.train(merged_df, class_attr)
+                        logger.debug(f"Join path {i} score: {tmp_metric}")
+
+                except Exception as e:
+                    logger.error(f"Error processing join path: {e}", exc_info=True)
+
+        logger.info(
+            f"Join path processing completed. Found {len(new_col_lst)} new columns"
+        )
 
         # Before clustering
         if len(new_col_lst) == 0:
@@ -244,6 +281,10 @@ def main():
         logger.error(f"An error occurred: {e}", exc_info=True)
         sys.exit(1)
 
+    end_time = time.time()
+    total_time = end_time - start_time
+    logger.info(f"Total execution time: {total_time:.2f} seconds")
+
 
 if __name__ == "__main__":
     with cProfile.Profile() as pr:
@@ -252,3 +293,7 @@ if __name__ == "__main__":
     stats = pstats.Stats(pr)
     stats.sort_stats(pstats.SortKey.TIME)
     stats.print_stats(15)
+
+    # Save profiling results to a file
+    stats.dump_stats("profile_results.prof")
+    logger.info("Profiling results saved to profile_results.prof")
