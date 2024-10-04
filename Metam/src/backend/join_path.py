@@ -29,34 +29,27 @@ def cached_get_fields_of_source(network, source):
 def cached_neighbors_id(network, field, relation):
     return network.neighbors_id(field, relation)
 
-def load_aurum_network(path):
-    path = Path(path).expanduser()
-    network = fieldnetwork.deserialize_network(str(path))
-    logger.info(f"Network type: {type(network)}")
-    logger.info(f"Network attributes: {dir(network)}")
 
-    with open(path / "schema_sim_index.pkl", 'rb') as f:
-        schema_sim_index = pickle.load(f)
+def get_join_paths_from_file(query_data, model_path):
+    network, schema_sim_index, content_sim_index = load_aurum_network(model_path)
 
-    with open(path / "content_sim_index.pkl", 'rb') as f:
-        content_sim_index = pickle.load(f)
+    logger.info(f"Loaded network with {network.graph_order()} nodes")
+    logger.info(f"Number of tables in the network: {network.get_number_tables()}")
+    logger.info(f"Sample of node IDs: {list(network.iterate_ids())[:5]}")
+    logger.info(
+        f"Sample of field info: {[network.get_info_for([nid]) for nid in list(network.iterate_ids())[:5]]}"
+    )
 
-    return network, schema_sim_index, content_sim_index
+    # Use the correct attribute name
+    graph = network._FieldNetwork__G
+    logger.info(f"Network loaded. Nodes: {len(graph)}, Edges: {len(graph.edges())}")
 
-
-def get_join_paths_from_aurum(network, query_data):
-    _time = time.time()
-    options = []
-
-    # Get all fields for the query table
-    query_fields = cached_get_fields_of_source(network, query_data)
-    # query_fields = network.get_fields_of_source(query_data)
+    join_paths = []
+    query_fields = network.get_fields_of_source(query_data)
     logger.info(f"Found {len(query_fields)} fields for {query_data}")
 
     for field in query_fields:
-        # Get PKFK relationships
-        pkfk_neighbors = cached_neighbors_id(field, fieldnetwork.Relation.PKFK)
-        # pkfk_neighbors = network.neighbors_id(field, fieldnetwork.Relation.PKFK)
+        pkfk_neighbors = network.neighbors_id(field, fieldnetwork.Relation.PKFK)
         logger.info(f"Found {len(pkfk_neighbors)} PKFK neighbors for field {field}")
 
         for neighbor in pkfk_neighbors:
@@ -69,13 +62,106 @@ def get_join_paths_from_aurum(network, query_data):
             jk2.tbl = neighbor.source_name
             jk2.col = neighbor.field_name
 
-            ret_jp = JoinPath([jk1, jk2])
-            options.append(ret_jp)
+            join_paths.append(JoinPath([jk1, jk2]))
 
-    end_time = time.time()
-    logger.info(f"Join path generation took {end_time - start_time:.2f} seconds")
+    logger.info(f"Retrieved {len(join_paths)} join paths from Aurum")
+    return join_paths
 
+
+
+def get_join_paths_from_aurum(network, query_data):
+    logger.info(f"Searching for join paths for query data: {query_data}")
+    options = []
+
+    # Get all source names in the network
+    all_sources = list(network._get_underlying_repr_table_to_ids().keys())
+    logger.info(f"All sources in the network: {all_sources}")
+
+    # Try to find the query_data in the network
+    matching_sources = [s for s in all_sources if query_data.lower() in s.lower()]
+    logger.info(f"Matching sources: {matching_sources}")
+
+    if not matching_sources:
+        logger.warning(f"No exact match found for {query_data}. Using all sources.")
+        matching_sources = all_sources
+
+    for source in matching_sources:
+        # Get all fields for the query table
+        query_fields = network.get_fields_of_source(source)
+        logger.info(f"Found {len(query_fields)} fields for {source}")
+        logger.info(f"Fields: {query_fields}")
+
+        for field in query_fields:
+            # Get PKFK relationships
+            pkfk_neighbors = network.neighbors_id(field, fieldnetwork.Relation.PKFK)
+
+            # Handle DRS object
+            if isinstance(pkfk_neighbors, api.apiutils.DRS):
+                pkfk_neighbors = pkfk_neighbors.data
+
+            logger.info(f"Found {len(pkfk_neighbors)} PKFK neighbors for field {field}")
+
+            for neighbor in pkfk_neighbors:
+                field_info = network.get_info_for([field])[0]
+                jk1 = JoinKey(source, field_info[3])  # field name
+                jk2 = JoinKey(neighbor.source_name, neighbor.field_name)
+                options.append(JoinPath([jk1, jk2]))
+                logger.info(f"Added join path: {options[-1].to_str()}")
+
+    logger.info(f"Found {len(options)} join paths")
     return options
+
+def load_aurum_network(path):
+    path = Path(path).expanduser()
+    logger.info(f"Loading Aurum network from: {path}")
+
+    try:
+        with open(path / "graph.pickle", "rb") as f:
+            G = pickle.load(f)
+        logger.info(f"Loaded graph with {len(G.nodes)} nodes and {len(G.edges)} edges")
+    except Exception as e:
+        logger.error(f"Failed to load graph.pickle: {str(e)}")
+        return None, None, None
+
+    try:
+        with open(path / "id_info.pickle", "rb") as f:
+            id_to_info = pickle.load(f)
+        logger.info(f"Loaded id_info with {len(id_to_info)} entries")
+    except Exception as e:
+        logger.error(f"Failed to load id_info.pickle: {str(e)}")
+        return None, None, None
+
+    try:
+        with open(path / "table_ids.pickle", "rb") as f:
+            table_to_ids = pickle.load(f)
+        logger.info(f"Loaded table_ids with {len(table_to_ids)} entries")
+        logger.info(f"Table names in the model: {list(table_to_ids.keys())}")
+    except Exception as e:
+        logger.error(f"Failed to load table_ids.pickle: {str(e)}")
+        return None, None, None
+
+    network = fieldnetwork.FieldNetwork(G, id_to_info, table_to_ids)
+
+    # Print more information about the loaded model
+    logger.info(f"Number of nodes in the network: {network.graph_order()}")
+    logger.info(f"Number of tables in the network: {network.get_number_tables()}")
+
+    # Print sample of table names and their fields
+    sample_tables = list(table_to_ids.keys())[:5]  # Print first 5 tables
+    for table in sample_tables:
+        fields = network.get_fields_of_source(table)
+        logger.info(f"Table: {table}, Fields: {fields}")
+
+    # Print sample of PKFK relationships
+    logger.info("Sample of PKFK relationships:")
+    for node in list(G.nodes())[:5]:  # Print PKFK for first 5 nodes
+        pkfk_neighbors = network.neighbors_id(node, fieldnetwork.Relation.PKFK)
+        if isinstance(pkfk_neighbors, api.apiutils.DRS):
+            pkfk_neighbors = pkfk_neighbors.data
+        logger.info(f"Node: {node}, PKFK neighbors: {[n.nid for n in pkfk_neighbors]}")
+
+    return network, None, None
+
 
 
 def get_column_lst(joinable_lst):
@@ -315,42 +401,13 @@ def cluster_join_paths(joinable_lst, k, epsilon):
     return (centers, assignment, get_clusters(assignment, k))
 
 
-#def get_join_paths_from_file(query_data, join_paths):
+# def get_join_paths_from_file(query_data, join_paths):
 #    network, schema_sim_index, content_sim_index = load_aurum_network(join_paths)
 #    # logger.info(f"Network loaded. Nodes: {len(network.nodes())}, Edges: {len(network.edges())}")
 #    paths = get_join_paths_from_aurum(network, query_data)
 #    logger.info(f"Retrieved {len(paths)} join paths from Aurum")
 #    return paths
 
-def get_join_paths_from_file(query_data, model_path):
-    network, schema_sim_index, content_sim_index = load_aurum_network(model_path)
-
-    # Use the correct attribute name
-    graph = network._FieldNetwork__G
-    logger.info(f"Network loaded. Nodes: {len(graph)}, Edges: {len(graph.edges())}")
-
-    join_paths = []
-    query_fields = network.get_fields_of_source(query_data)
-    logger.info(f"Found {len(query_fields)} fields for {query_data}")
-
-    for field in query_fields:
-        pkfk_neighbors = network.neighbors_id(field, fieldnetwork.Relation.PKFK)
-        logger.info(f"Found {len(pkfk_neighbors)} PKFK neighbors for field {field}")
-
-        for neighbor in pkfk_neighbors:
-            jk1 = JoinKey('','',0,0)
-            jk2 = JoinKey('','',0,0)
-
-            jk1.tbl = query_data
-            jk1.col = network.get_info_for([field])[0][3]  # field name
-
-            jk2.tbl = neighbor.source_name
-            jk2.col = neighbor.field_name
-
-            join_paths.append(JoinPath([jk1, jk2]))
-
-    logger.info(f"Retrieved {len(join_paths)} join paths from Aurum")
-    return join_paths
 
 # def get_join_paths_from_file(querydata,filepath):
 #    df=pd.read_csv(filepath)

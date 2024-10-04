@@ -123,8 +123,8 @@ def main():
         epsilon = config["metam"]["epsilon"]
         theta = config["metam"]["theta"]
         uninfo = config["metam"]["uninfo"]
-        filepath = Path(config["paths"]["model"]).expanduser()
-        logger.info(f"Loading Aurum network from: {filepath}")
+        model_path = Path(config["paths"]["model"]).expanduser()
+        logger.info(f"Loading Aurum network from: {model_path}")
 
         logger.info(f"Loading base dataset from {query_path}")
         base_df = pd.read_csv(query_path)
@@ -145,16 +145,33 @@ def main():
         # max_iterations = config["metam"].get("max_iterations", float("inf"))
         # max_join_paths = config["metam"].get("max_join_paths", float("inf"))
 
-        joinable_options = join_path.get_join_paths_from_file(query_data, str(filepath))
 
-        if args.debug:
-            for i, jp in enumerate(
-                joinable_options[:5]
-            ):  # Print first 5 join paths in debug mode
-                logger.debug(f"Join path {i}: {jp.to_str()}")
+        network, _, _ = join_path.load_aurum_network(str(model_path))
 
-        # After getting joinable_options
-        logger.info(f"Number of joinable options found: {len(joinable_options)}")
+
+        if network:
+            # Remove the .csv extension from the query_data if present
+            query_data_name = query_data.rsplit('.', 1)[0] if query_data.endswith('.csv') else query_data
+
+            # Check if the query_data_name exists in the network
+            all_sources = list(network._get_underlying_repr_table_to_ids().keys())
+            if query_data_name not in all_sources:
+                logger.warning(f"Table '{query_data_name}' not found in the Aurum model. Available tables: {all_sources}")
+                logger.info("Attempting to find a similar table name...")
+                similar_tables = [s for s in all_sources if query_data_name.lower() in s.lower()]
+                if similar_tables:
+                    query_data_name = similar_tables[0]
+                    logger.info(f"Using similar table name: {query_data_name}")
+                else:
+                    logger.warning("No similar table name found. Using all tables.")
+                    query_data_name = None
+
+            joinable_options = get_join_paths_from_aurum(network, query_data_name)
+        else:
+            logger.warning("Failed to load Aurum network. Falling back to CSV-based join paths.")
+            joinable_options = get_join_paths_from_file(query_data, str(model_path / 'network_opendata_06.csv'))
+
+
 
         tpot_config = config["metam"].get("tpot", {})
         oracle = OracleFactory.create(config["oracle"]["type"], config=tpot_config)
