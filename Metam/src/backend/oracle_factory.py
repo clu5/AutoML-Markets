@@ -79,25 +79,40 @@ class ClassificationOracle(BaseOracle):
 
 class OracleFactory:
     @staticmethod
-    def create(oracle_type):
+    def create(oracle_type, config=None):
         if oracle_type == "regression":
-            return AutoMLOracle("regression")
+            return AutoMLOracle("regression", config)
         elif oracle_type == "classification":
-            return AutoMLOracle("classification")
+            return AutoMLOracle("classification", config)
         else:
             raise ValueError(f"Unknown oracle type: {oracle_type}")
 
 
 class AutoMLOracle(BaseOracle):
-    def __init__(self, problem_type="classification"):
+    def __init__(self, problem_type="classification", config=None):
         self.problem_type = problem_type
+        self.config = config or {}
         if problem_type == "classification":
             self.model = TPOTClassifier(
-                generations=5, population_size=20, cv=5, random_state=42, verbosity=2
+                generations=self.config.get('generations', 5),
+                population_size=self.config.get('population_size', 20),
+                cv=self.config.get('cv', 5),
+                random_state=42,
+                verbosity=2,
+                n_jobs=self.config.get('n_jobs', -1),
+                max_time_mins=self.config.get('max_time_mins', 60),
+                max_eval_time_mins=self.config.get('max_eval_time_mins', 5)
             )
         elif problem_type == "regression":
             self.model = TPOTRegressor(
-                generations=5, population_size=20, cv=5, random_state=42, verbosity=2
+                generations=self.config.get('generations', 5),
+                population_size=self.config.get('population_size', 20),
+                cv=self.config.get('cv', 5),
+                random_state=42,
+                verbosity=2,
+                n_jobs=self.config.get('n_jobs', -1),
+                max_time_mins=self.config.get('max_time_mins', 60),
+                max_eval_time_mins=self.config.get('max_eval_time_mins', 5)
             )
         else:
             raise ValueError("problem_type must be 'classification' or 'regression'")

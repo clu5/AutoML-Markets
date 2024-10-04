@@ -1,4 +1,5 @@
 import logging
+from functools import lru_cache
 import pickle
 import random
 import sys
@@ -17,6 +18,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+@lru_cache(maxsize=None)
+def cached_get_fields_of_source(network, source):
+    return network.get_fields_of_source(source)
+
+@lru_cache(maxsize=None)
+def cached_neighbors_id(network, field, relation):
+    return network.neighbors_id(field, relation)
+
+
 def load_aurum_network(path):
     network = fieldnetwork.deserialize_network(path)
 
@@ -33,12 +44,14 @@ def get_join_paths_from_aurum(network, query_data):
     options = []
 
     # Get all fields for the query table
-    query_fields = network.get_fields_of_source(query_data)
+    query_fields = cached_get_fields_of_source(network, query_data)
+   # query_fields = network.get_fields_of_source(query_data)
     logger.info(f"Found {len(query_fields)} fields for {query_data}")
 
     for field in query_fields:
         # Get PKFK relationships
-        pkfk_neighbors = network.neighbors_id(field, fieldnetwork.Relation.PKFK)
+        pkfk_neighbors = cached_neighbors_id(field, fieldnetwork.Relation.PKFK)
+        #pkfk_neighbors = network.neighbors_id(field, fieldnetwork.Relation.PKFK)
         logger.info(f"Found {len(pkfk_neighbors)} PKFK neighbors for field {field}")
 
         for neighbor in pkfk_neighbors:
@@ -236,8 +249,10 @@ def cluster_join_paths(joinable_lst,k,epsilon):
 
 def get_join_paths_from_file(query_data, join_paths):
     network, schema_sim_index, content_sim_index = load_aurum_network(join_paths)
-    logger.info(f"Found {len(join_paths)} join paths for {query_data}")
-    return get_join_paths_from_aurum(network, query_data)
+    #logger.info(f"Network loaded. Nodes: {len(network.nodes())}, Edges: {len(network.edges())}")
+    paths = get_join_paths_from_aurum(network, query_data)
+    logger.info(f"Retrieved {len(paths)} join paths from Aurum")
+    return paths
 
 
 #def get_join_paths_from_file(querydata,filepath):

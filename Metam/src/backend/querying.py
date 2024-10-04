@@ -1,4 +1,5 @@
 import copy
+from functools import lru_cache
 import math
 import operator
 import pickle
@@ -35,6 +36,11 @@ class Exp3:
 
     def update(self, arm, reward):
         self.weights[arm] *= np.exp(self.gamma * reward / self.n_arms)
+
+
+@lru_cache(maxsize=None)
+def cached_sort_candidates(new_col_lst, candidates, weights, overall_queried):
+    return profile_weights.sort_candidates(new_col_lst, candidates, weights, overall_queried)
 
 
 def run_metam_online(
@@ -160,9 +166,13 @@ def run_metam(
 
             while len(queried_cand) < tau and curr_max <= metric:
                 if it == 0 or not queried_cand:
-                    sorted_cand = profile_weights.sort_candidates(
-                        new_col_lst, candidates, weights, overall_queried
+                    #sorted_cand = profile_weights.sort_candidates(
+                    #    new_col_lst, candidates, weights, overall_queried
+                    #)
+                    sorted_cand = cached_sort_candidates(
+                        tuple(new_col_lst), tuple(candidates), tuple(weights.items()), tuple(overall_queried.items())
                     )
+
 
                 candidate_id = next(
                     (c for c, _ in sorted_cand if c not in queried_cand), None
